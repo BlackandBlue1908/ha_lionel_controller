@@ -321,10 +321,19 @@ class LionelTrainCoordinator:
         max_attempts = 10  # Try up to 10 times before giving up
         
         while attempt < max_attempts:
+            # Check if auto-reconnect was disabled
+            if not self._auto_reconnect_enabled:
+                _LOGGER.info("Auto-reconnect disabled, stopping reconnection attempts")
+                return
+            
             attempt += 1
             
-            # Wait before attempting reconnection (with increasing backoff)
-            wait_time = min(self._reconnect_interval * (1 + attempt * 0.5), 120)  # Max 2 minutes
+            # Wait before attempting reconnection (shorter initial wait, then backoff)
+            if attempt == 1:
+                wait_time = 5  # First attempt after 5 seconds
+            else:
+                wait_time = min(10 * attempt, 60)  # Then 20s, 30s, 40s... up to 60s max
+            
             _LOGGER.debug("Waiting %.1f seconds before reconnection attempt %d/%d", 
                          wait_time, attempt, max_attempts)
             await asyncio.sleep(wait_time)
@@ -332,6 +341,11 @@ class LionelTrainCoordinator:
             # Check if already connected (might have reconnected via other means)
             if self.connected:
                 _LOGGER.info("Already reconnected to train")
+                return
+            
+            # Check again if auto-reconnect was disabled during wait
+            if not self._auto_reconnect_enabled:
+                _LOGGER.info("Auto-reconnect disabled, stopping reconnection attempts")
                 return
             
             try:
@@ -379,15 +393,26 @@ class LionelTrainCoordinator:
                     disconnected_callback=self._on_disconnected,
                 )
                 
-                # Read device information if available
-                await self._read_device_info()
+                # Mark as connected immediately after establishing connection
+                self._connected = True
+                self._retry_count = 0
+                _LOGGER.info("Connected to Lionel train at %s", self.mac_address)
                 
-                # Log all BLE services and characteristics for debugging
-                await self._log_ble_characteristics()
-                
-                # Set up notification handler for status updates
+                # Read device information if available (non-critical)
                 try:
-                    # Always use the known-good notify characteristic UUID
+                    await self._read_device_info()
+                except Exception as err:
+                    _LOGGER.debug("Could not read device info: %s", err)
+                
+                # Log BLE services for debugging (non-critical, skip on reconnect)
+                if self._discovered_lionchief_service is None:
+                    try:
+                        await self._log_ble_characteristics()
+                    except Exception as err:
+                        _LOGGER.debug("Could not log BLE characteristics: %s", err)
+                
+                # Set up notification handler for status updates (non-critical)
+                try:
                     notify_char_uuid = NOTIFY_CHARACTERISTIC_UUID
                     await self._client.start_notify(
                         notify_char_uuid, self._notification_handler
@@ -395,10 +420,6 @@ class LionelTrainCoordinator:
                     _LOGGER.info("Set up notifications on %s", notify_char_uuid)
                 except BleakError as err:
                     _LOGGER.debug("Could not set up notifications (train may not support them): %s", err)
-                
-                self._connected = True
-                self._retry_count = 0
-                _LOGGER.info("Connected to Lionel train at %s", self.mac_address)
 
             except BleakError as err:
                 _LOGGER.error("Failed to connect to train: %s", err)

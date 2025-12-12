@@ -29,6 +29,7 @@ async def async_setup_entry(
         LionelTrainLightsSwitch(coordinator, name),
         LionelTrainHornSwitch(coordinator, name),
         LionelTrainBellSwitch(coordinator, name),
+        LionelTrainAutoReconnectSwitch(coordinator, name),
     ]
     
     async_add_entities(switches, True)
@@ -132,4 +133,42 @@ class LionelTrainBellSwitch(LionelTrainSwitchBase):
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off the bell."""
         await self._coordinator.async_set_bell(False)
+        self.async_write_ha_state()
+
+
+class LionelTrainAutoReconnectSwitch(SwitchEntity):
+    """Switch for enabling/disabling automatic reconnection."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Auto Reconnect"
+    _attr_icon = "mdi:bluetooth-connect"
+
+    def __init__(self, coordinator: LionelTrainCoordinator, device_name: str) -> None:
+        """Initialize the auto-reconnect switch."""
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{coordinator.mac_address}_auto_reconnect"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, coordinator.mac_address)},
+            "name": device_name,
+            **coordinator.device_info,
+        }
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available (always available)."""
+        return True
+
+    @property
+    def is_on(self) -> bool:
+        """Return True if auto-reconnect is enabled."""
+        return self._coordinator.auto_reconnect_enabled
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Enable auto-reconnect."""
+        self._coordinator.set_auto_reconnect(True)
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disable auto-reconnect."""
+        self._coordinator.set_auto_reconnect(False)
         self.async_write_ha_state()

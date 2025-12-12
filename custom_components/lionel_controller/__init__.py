@@ -165,6 +165,7 @@ class LionelTrainCoordinator:
         # Reconnection task
         self._reconnect_task: asyncio.Task | None = None
         self._reconnect_interval = 30  # seconds between reconnection attempts
+        self._auto_reconnect_enabled = True  # User-controllable auto-reconnect setting
 
     @property
     def connected(self) -> bool:
@@ -233,6 +234,21 @@ class LionelTrainCoordinator:
         return self._last_notification_hex
 
     @property
+    def auto_reconnect_enabled(self) -> bool:
+        """Return True if auto-reconnect is enabled."""
+        return self._auto_reconnect_enabled
+
+    def set_auto_reconnect(self, enabled: bool) -> None:
+        """Enable or disable auto-reconnect."""
+        self._auto_reconnect_enabled = enabled
+        _LOGGER.info("Auto-reconnect %s", "enabled" if enabled else "disabled")
+        
+        # If disabling, cancel any pending reconnection task
+        if not enabled and self._reconnect_task and not self._reconnect_task.done():
+            self._reconnect_task.cancel()
+            _LOGGER.debug("Cancelled pending reconnection task")
+
+    @property
     def device_info(self) -> dict:
         """Return device information."""
         return {
@@ -288,11 +304,14 @@ class LionelTrainCoordinator:
         self._connected = False
         self._notify_state_change()
         
-        # Schedule automatic reconnection
-        if self._reconnect_task is None or self._reconnect_task.done():
-            self._reconnect_task = self.hass.async_create_task(
-                self._async_reconnect_loop()
-            )
+        # Schedule automatic reconnection if enabled
+        if self._auto_reconnect_enabled:
+            if self._reconnect_task is None or self._reconnect_task.done():
+                self._reconnect_task = self.hass.async_create_task(
+                    self._async_reconnect_loop()
+                )
+        else:
+            _LOGGER.debug("Auto-reconnect is disabled, not attempting reconnection")
 
     async def _async_reconnect_loop(self) -> None:
         """Attempt to reconnect to the train periodically."""

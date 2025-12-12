@@ -164,9 +164,16 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # First, check Home Assistant's Bluetooth cache for known devices
             service_infos = bluetooth.async_discovered_service_info(self.hass)
             
+            _LOGGER.debug("Scanning %d devices from HA Bluetooth cache", len(list(service_infos)))
+            
+            # Re-get the iterator since we consumed it for counting
+            service_infos = bluetooth.async_discovered_service_info(self.hass)
+            
             for service_info in service_infos:
-                # Check if device name starts with "LC" (LionChief naming convention)
                 device_name = service_info.name or ""
+                _LOGGER.debug("Checking device: name='%s', address=%s", device_name, service_info.address)
+                
+                # Check if device name starts with "LC" (LionChief naming convention)
                 if not device_name.upper().startswith("LC"):
                     continue
                 
@@ -174,13 +181,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 
                 # Skip already configured devices
                 if self._is_already_configured(mac):
+                    _LOGGER.debug("Skipping already configured device: %s", mac)
                     continue
                 
                 self._scanned_devices[mac] = {
                     "mac_address": mac,
                     "name": device_name,
                 }
-                _LOGGER.debug("Found Lionel train: %s at %s", device_name, mac)
+                _LOGGER.info("Found Lionel train: %s at %s", device_name, mac)
             
             # If no devices found in cache, try active scanning
             if not self._scanned_devices:

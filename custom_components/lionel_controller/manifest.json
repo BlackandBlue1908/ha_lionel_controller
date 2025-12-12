@@ -1,12 +1,12 @@
 {
   "domain": "lionel_controller",
   "name": "Lionel Train Controller",
-  "version": "1.0.0",
-  "documentation": "https://github.com/iamjoshk/ha_lionel_controller",
-  "issue_tracker": "https://github.com/iamjoshk/ha_lionel_controller/issues",
-  "dependencies": [],
+  "version": "1.1.0",
+  "documentation": "https://github.com/BlackandBlue1908/ha_lionel_controller",
+  "issue_tracker": "https://github.com/BlackandBlue1908/ha_lionel_controller/issues",
+  "dependencies": ["bluetooth"],
   "config_flow": true,
-  "codeowners": ["@iamjoshk"],
+  "codeowners": ["@BlackandBlue1908"],
   "requirements": ["bleak>=0.20.0", "bleak-retry-connector>=3.4.0"],
   "bluetooth": [
     {

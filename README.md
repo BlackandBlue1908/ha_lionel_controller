@@ -29,13 +29,14 @@ A Home Assistant custom integration for controlling Lionel LionChief Bluetooth l
 
 ### Switch Entities  
 - **Lights**: Control locomotive lighting (defaults to on)
-- **Horn**: Turn horn sound on/off
-- **Bell**: Turn bell sound on/off
+- **Auto Reconnect**: Enable/disable automatic reconnection when train becomes available
 
 ### Button Entities
 - **Stop**: Emergency stop button (sets throttle to 0)
 - **Forward**: Set locomotive direction to forward
 - **Reverse**: Set locomotive direction to reverse
+- **Horn**: Sound the horn
+- **Bell**: Ring the bell
 - **Disconnect**: Disconnect from locomotive
 - **Announcements**: Various conductor announcements
   - Random, Ready to Roll, Hey There, Squeaky
@@ -120,6 +121,36 @@ This information is displayed in Home Assistant's device registry for better ide
 - Should work with other LionChief Bluetooth locomotives
 - Requires Home Assistant 2023.8.0 or later
 - Requires Python bleak 0.20.0 or later
+
+## Custom Lovelace Card
+
+The integration includes a custom Lovelace card for a train-themed control interface.
+
+### Adding the Card Resource
+
+1. Go to **Settings → Dashboards → Resources** (or click the three dots menu → Resources)
+2. Click **Add Resource**
+3. Enter URL: `/lionel_controller/lionel-train-card.js`
+4. Select **JavaScript Module**
+5. Click **Create**
+
+### Using the Card
+
+1. Edit your dashboard
+2. Click **Add Card**
+3. Search for "Lionel Train Controller" or scroll to find it
+4. Configure the card:
+   - **Entity**: Select your train's throttle entity (e.g., `number.lc_1234_throttle`)
+   - **Name**: Optional display name for the card
+
+### Card Features
+
+- **Large throttle slider** for easy speed control
+- **Direction buttons** (Forward/Reverse)
+- **Quick access buttons** for Horn, Bell, Lights
+- **Emergency Stop** button
+- **Connection status** indicator
+- **Disconnect** button
 
 ## Troubleshooting
 

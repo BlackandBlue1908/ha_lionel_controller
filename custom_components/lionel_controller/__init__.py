@@ -9,10 +9,12 @@ from bleak import BleakClient, BleakError
 from bleak_retry_connector import establish_connection, BleakClientWithServiceCache
 from homeassistant.components import bluetooth
 from homeassistant.components.bluetooth import BluetoothServiceInfoBleak, BluetoothChange
+from homeassistant.components.frontend import async_register_built_in_panel
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_NAME, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.http import StaticPathConfig
 
 from .const import (
     CMD_MASTER_VOLUME,
@@ -93,7 +95,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_register(DOMAIN, "reload_integration", reload_integration_service)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    
+    # Register the custom Lovelace card
+    await _async_register_card(hass)
+    
     return True
+
+
+async def _async_register_card(hass: HomeAssistant) -> None:
+    """Register the custom Lovelace card."""
+    # Register the www folder as a static path
+    import os
+    card_path = os.path.join(os.path.dirname(__file__), "www")
+    
+    try:
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig("/lionel_controller", card_path, cache_headers=False)]
+        )
+        _LOGGER.debug("Registered static path for Lionel Train card")
+    except Exception as err:
+        _LOGGER.debug("Static path may already be registered: %s", err)
+    
+    # Add the card to Lovelace resources
+    hass.components.frontend.async_register_built_in_panel
+    
+    # Register the card resource
+    hass.http.register_static_path
+    _LOGGER.info("Lionel Train card available at /lionel_controller/lionel-train-card.js")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

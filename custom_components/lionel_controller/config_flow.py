@@ -131,18 +131,20 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
 
         # Scan for Lionel trains
+        _LOGGER.info("Scanning for Lionel LionChief trains...")
         await self._async_scan_for_trains()
+        _LOGGER.info("Scan complete. Found %d trains.", len(self._scanned_devices))
         
-        if not self._scanned_devices:
-            # No devices found, go directly to manual entry
-            return await self.async_step_manual()
-        
-        # Build selection list
+        # Build selection list - always show the form with manual entry option
         device_options = {
             mac: f"{info['name']} ({mac})"
             for mac, info in self._scanned_devices.items()
         }
         device_options[MANUAL_ENTRY] = "Enter MAC address manually..."
+        
+        # Show description based on whether devices were found
+        if not self._scanned_devices:
+            errors["base"] = "no_devices_found"
         
         return self.async_show_form(
             step_id="user",

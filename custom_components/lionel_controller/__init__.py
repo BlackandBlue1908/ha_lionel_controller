@@ -329,7 +329,7 @@ class LionelTrainCoordinator:
         """Periodically check if train is available and connect when found."""
         _LOGGER.info("Monitoring for train availability at %s", self.mac_address)
         
-        check_interval = 30  # Check every 30 seconds
+        check_interval = 10  # Check every 10 seconds
         
         while True:
             # Stop if auto-reconnect is disabled

@@ -243,10 +243,19 @@ class LionelTrainCoordinator:
         self._auto_reconnect_enabled = enabled
         _LOGGER.info("Auto-reconnect %s", "enabled" if enabled else "disabled")
         
-        # If disabling, cancel any pending reconnection task
-        if not enabled and self._reconnect_task and not self._reconnect_task.done():
-            self._reconnect_task.cancel()
-            _LOGGER.debug("Cancelled pending reconnection task")
+        if not enabled:
+            # If disabling, cancel any pending reconnection task
+            if self._reconnect_task and not self._reconnect_task.done():
+                self._reconnect_task.cancel()
+                _LOGGER.debug("Cancelled pending reconnection task")
+            # Also cancel availability monitor
+            if hasattr(self, '_monitor_task') and self._monitor_task and not self._monitor_task.done():
+                self._monitor_task.cancel()
+                _LOGGER.debug("Cancelled availability monitor")
+        else:
+            # If enabling and not connected, start availability monitor
+            if not self.connected:
+                self._start_availability_monitor()
 
     @property
     def device_info(self) -> dict:
@@ -282,7 +291,9 @@ class LionelTrainCoordinator:
         except (BleakError, asyncio.TimeoutError) as err:
             _LOGGER.debug("Initial connection failed during setup: %s", err)
             # Don't raise - let the integration load anyway
-            # Connection will be attempted when entities try to communicate
+            # Start background monitoring to connect when train becomes available
+            if self._auto_reconnect_enabled:
+                self._start_availability_monitor()
 
     async def async_shutdown(self) -> None:
         """Shut down the coordinator."""
@@ -294,9 +305,65 @@ class LionelTrainCoordinator:
             except asyncio.CancelledError:
                 pass
         
+        # Cancel availability monitor task
+        if hasattr(self, '_monitor_task') and self._monitor_task and not self._monitor_task.done():
+            self._monitor_task.cancel()
+            try:
+                await self._monitor_task
+            except asyncio.CancelledError:
+                pass
+        
         if self._client and self._client.is_connected:
             await self._client.disconnect()
         self._connected = False
+
+    def _start_availability_monitor(self) -> None:
+        """Start background task to monitor for train availability."""
+        if not hasattr(self, '_monitor_task') or self._monitor_task is None or self._monitor_task.done():
+            self._monitor_task = self.hass.async_create_task(
+                self._async_availability_monitor()
+            )
+            _LOGGER.info("Started availability monitor for %s", self.mac_address)
+
+    async def _async_availability_monitor(self) -> None:
+        """Periodically check if train is available and connect when found."""
+        _LOGGER.info("Monitoring for train availability at %s", self.mac_address)
+        
+        check_interval = 30  # Check every 30 seconds
+        
+        while True:
+            # Stop if auto-reconnect is disabled
+            if not self._auto_reconnect_enabled:
+                _LOGGER.debug("Auto-reconnect disabled, stopping availability monitor")
+                return
+            
+            # Stop if already connected
+            if self.connected:
+                _LOGGER.debug("Train connected, stopping availability monitor")
+                return
+            
+            await asyncio.sleep(check_interval)
+            
+            # Check again after sleep
+            if not self._auto_reconnect_enabled or self.connected:
+                return
+            
+            # Check if device is available in HA's Bluetooth cache
+            ble_device = bluetooth.async_ble_device_from_address(
+                self.hass, self.mac_address, connectable=True
+            )
+            
+            if ble_device:
+                _LOGGER.info("Train detected at %s, attempting connection", self.mac_address)
+                try:
+                    await self._async_connect()
+                    if self.connected:
+                        _LOGGER.info("Successfully connected to train via availability monitor")
+                        return
+                except (BleakError, asyncio.TimeoutError) as err:
+                    _LOGGER.debug("Connection attempt failed: %s", err)
+            else:
+                _LOGGER.debug("Train not yet available at %s", self.mac_address)
 
     def _on_disconnected(self, client: BleakClient) -> None:
         """Handle disconnection from the train."""

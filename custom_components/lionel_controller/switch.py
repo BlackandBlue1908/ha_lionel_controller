@@ -27,8 +27,6 @@ async def async_setup_entry(
     
     switches = [
         LionelTrainLightsSwitch(coordinator, name),
-        LionelTrainHornSwitch(coordinator, name),
-        LionelTrainBellSwitch(coordinator, name),
         LionelTrainAutoReconnectSwitch(coordinator, name),
     ]
     
@@ -79,60 +77,6 @@ class LionelTrainLightsSwitch(LionelTrainSwitchBase):
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off the lights."""
         await self._coordinator.async_set_lights(False)
-        self.async_write_ha_state()
-
-
-class LionelTrainHornSwitch(LionelTrainSwitchBase):
-    """Switch for controlling train horn."""
-
-    _attr_name = "Horn"
-    _attr_icon = "mdi:bullhorn"
-
-    def __init__(self, coordinator: LionelTrainCoordinator, device_name: str) -> None:
-        """Initialize the horn switch."""
-        super().__init__(coordinator, device_name)
-        self._attr_unique_id = f"{coordinator.mac_address}_horn"
-
-    @property
-    def is_on(self) -> bool:
-        """Return True if the horn is on."""
-        return self._coordinator.horn_on
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        """Turn on the horn."""
-        await self._coordinator.async_set_horn(True)
-        self.async_write_ha_state()
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        """Turn off the horn."""
-        await self._coordinator.async_set_horn(False)
-        self.async_write_ha_state()
-
-
-class LionelTrainBellSwitch(LionelTrainSwitchBase):
-    """Switch for controlling train bell."""
-
-    _attr_name = "Bell"
-    _attr_icon = "mdi:bell"
-
-    def __init__(self, coordinator: LionelTrainCoordinator, device_name: str) -> None:
-        """Initialize the bell switch."""
-        super().__init__(coordinator, device_name)
-        self._attr_unique_id = f"{coordinator.mac_address}_bell"
-
-    @property
-    def is_on(self) -> bool:
-        """Return True if the bell is on."""
-        return self._coordinator.bell_on
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        """Turn on the bell."""
-        await self._coordinator.async_set_bell(True)
-        self.async_write_ha_state()
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        """Turn off the bell."""
-        await self._coordinator.async_set_bell(False)
         self.async_write_ha_state()
 
 

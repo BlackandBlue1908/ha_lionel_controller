@@ -29,6 +29,8 @@ async def async_setup_entry(
         LionelTrainStopButton(coordinator, name),
         LionelTrainForwardButton(coordinator, name),
         LionelTrainReverseButton(coordinator, name),
+        LionelTrainHornButton(coordinator, name),
+        LionelTrainBellButton(coordinator, name),
     ]
     
     # Add announcement buttons
@@ -122,6 +124,38 @@ class LionelTrainReverseButton(LionelTrainButtonBase):
     async def async_press(self) -> None:
         """Press the button."""
         await self._coordinator.async_set_direction(False)
+
+
+class LionelTrainHornButton(LionelTrainButtonBase):
+    """Button for sounding the horn."""
+
+    _attr_name = "Horn"
+    _attr_icon = "mdi:bullhorn"
+
+    def __init__(self, coordinator: LionelTrainCoordinator, device_name: str) -> None:
+        """Initialize the horn button."""
+        super().__init__(coordinator, device_name)
+        self._attr_unique_id = f"{coordinator.mac_address}_horn"
+
+    async def async_press(self) -> None:
+        """Press the button to sound horn."""
+        await self._coordinator.async_set_horn(True)
+
+
+class LionelTrainBellButton(LionelTrainButtonBase):
+    """Button for ringing the bell."""
+
+    _attr_name = "Bell"
+    _attr_icon = "mdi:bell"
+
+    def __init__(self, coordinator: LionelTrainCoordinator, device_name: str) -> None:
+        """Initialize the bell button."""
+        super().__init__(coordinator, device_name)
+        self._attr_unique_id = f"{coordinator.mac_address}_bell"
+
+    async def async_press(self) -> None:
+        """Press the button to ring bell."""
+        await self._coordinator.async_set_bell(True)
 
 
 class LionelTrainAnnouncementButton(LionelTrainButtonBase):

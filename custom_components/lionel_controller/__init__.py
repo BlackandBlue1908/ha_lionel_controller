@@ -161,6 +161,10 @@ class LionelTrainCoordinator:
         
         # Status information
         self._last_notification_hex = None
+        
+        # Reconnection task
+        self._reconnect_task: asyncio.Task | None = None
+        self._reconnect_interval = 30  # seconds between reconnection attempts
 
     @property
     def connected(self) -> bool:
@@ -266,9 +270,63 @@ class LionelTrainCoordinator:
 
     async def async_shutdown(self) -> None:
         """Shut down the coordinator."""
+        # Cancel any pending reconnection task
+        if self._reconnect_task and not self._reconnect_task.done():
+            self._reconnect_task.cancel()
+            try:
+                await self._reconnect_task
+            except asyncio.CancelledError:
+                pass
+        
         if self._client and self._client.is_connected:
             await self._client.disconnect()
         self._connected = False
+
+    def _on_disconnected(self, client: BleakClient) -> None:
+        """Handle disconnection from the train."""
+        _LOGGER.warning("Disconnected from Lionel train at %s", self.mac_address)
+        self._connected = False
+        self._notify_state_change()
+        
+        # Schedule automatic reconnection
+        if self._reconnect_task is None or self._reconnect_task.done():
+            self._reconnect_task = self.hass.async_create_task(
+                self._async_reconnect_loop()
+            )
+
+    async def _async_reconnect_loop(self) -> None:
+        """Attempt to reconnect to the train periodically."""
+        _LOGGER.info("Starting automatic reconnection attempts for %s", self.mac_address)
+        
+        attempt = 0
+        max_attempts = 10  # Try up to 10 times before giving up
+        
+        while attempt < max_attempts:
+            attempt += 1
+            
+            # Wait before attempting reconnection (with increasing backoff)
+            wait_time = min(self._reconnect_interval * (1 + attempt * 0.5), 120)  # Max 2 minutes
+            _LOGGER.debug("Waiting %.1f seconds before reconnection attempt %d/%d", 
+                         wait_time, attempt, max_attempts)
+            await asyncio.sleep(wait_time)
+            
+            # Check if already connected (might have reconnected via other means)
+            if self.connected:
+                _LOGGER.info("Already reconnected to train")
+                return
+            
+            try:
+                _LOGGER.info("Reconnection attempt %d/%d for %s", attempt, max_attempts, self.mac_address)
+                await self._async_connect()
+                
+                if self.connected:
+                    _LOGGER.info("Successfully reconnected to Lionel train at %s", self.mac_address)
+                    return
+                    
+            except (BleakError, asyncio.TimeoutError) as err:
+                _LOGGER.debug("Reconnection attempt %d failed: %s", attempt, err)
+        
+        _LOGGER.warning("Failed to reconnect to train after %d attempts. Will retry when command is sent.", max_attempts)
 
     async def _async_connect(self) -> None:
         """Connect to the train."""
@@ -299,6 +357,7 @@ class LionelTrainCoordinator:
                     ble_device,
                     self.mac_address,
                     max_attempts=3,
+                    disconnected_callback=self._on_disconnected,
                 )
                 
                 # Read device information if available
@@ -314,7 +373,7 @@ class LionelTrainCoordinator:
                     await self._client.start_notify(
                         notify_char_uuid, self._notification_handler
                     )
-                    _LOGGER.info("📡 Set up notifications on %s", notify_char_uuid)
+                    _LOGGER.info("Set up notifications on %s", notify_char_uuid)
                 except BleakError as err:
                     _LOGGER.debug("Could not set up notifications (train may not support them): %s", err)
                 

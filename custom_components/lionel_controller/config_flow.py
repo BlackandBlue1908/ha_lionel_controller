@@ -165,23 +165,22 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             service_infos = bluetooth.async_discovered_service_info(self.hass)
             
             for service_info in service_infos:
-                # Check if this device has the LionChief service UUID
-                if any(
-                    uuid.lower() == LIONCHIEF_SERVICE_UUID.lower()
-                    for uuid in service_info.service_uuids
-                ):
-                    mac = service_info.address.upper()
-                    
-                    # Skip already configured devices
-                    if self._is_already_configured(mac):
-                        continue
-                    
-                    name = service_info.name or f"Lionel Train {mac[-5:].replace(':', '')}"
-                    self._scanned_devices[mac] = {
-                        "mac_address": mac,
-                        "name": name,
-                    }
-                    _LOGGER.debug("Found Lionel train: %s at %s", name, mac)
+                # Check if device name starts with "LC" (LionChief naming convention)
+                device_name = service_info.name or ""
+                if not device_name.upper().startswith("LC"):
+                    continue
+                
+                mac = service_info.address.upper()
+                
+                # Skip already configured devices
+                if self._is_already_configured(mac):
+                    continue
+                
+                self._scanned_devices[mac] = {
+                    "mac_address": mac,
+                    "name": device_name,
+                }
+                _LOGGER.debug("Found Lionel train: %s at %s", device_name, mac)
             
             # If no devices found in cache, try active scanning
             if not self._scanned_devices:
@@ -190,25 +189,23 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 devices = await scanner.discover(timeout=10.0)
                 
                 for device in devices:
-                    # Check device metadata for LionChief service
-                    if hasattr(device, 'metadata') and device.metadata:
-                        uuids = device.metadata.get('uuids', [])
-                        if any(
-                            uuid.lower() == LIONCHIEF_SERVICE_UUID.lower()
-                            for uuid in uuids
-                        ):
-                            mac = device.address.upper()
+                    # Check if device name starts with "LC" (LionChief naming convention)
+                    device_name = device.name or ""
+                    if not device_name.upper().startswith("LC"):
+                        continue
+                    
+                    mac = device.address.upper()
+                    
+                    if self._is_already_configured(mac):
+                        continue
+                    
+                    self._scanned_devices[mac] = {
+                        "mac_address": mac,
+                        "name": device_name,
+                    }
+                    _LOGGER.debug("Found Lionel train via scan: %s at %s", device_name, mac)
                             
-                            if self._is_already_configured(mac):
-                                continue
-                            
-                            name = device.name or f"Lionel Train {mac[-5:].replace(':', '')}"
-                            self._scanned_devices[mac] = {
-                                "mac_address": mac,
-                                "name": name,
-                            }
-                            _LOGGER.debug("Found Lionel train via scan: %s at %s", name, mac)
-                            
+
         except BleakError as err:
             _LOGGER.warning("Error scanning for Bluetooth devices: %s", err)
 

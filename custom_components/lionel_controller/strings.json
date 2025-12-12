@@ -3,7 +3,14 @@
     "step": {
       "user": {
         "title": "Lionel Train Controller",
-        "description": "Set up your Lionel LionChief locomotive",
+        "description": "Select a discovered Lionel train or enter the MAC address manually.",
+        "data": {
+          "device": "Lionel Train"
+        }
+      },
+      "manual": {
+        "title": "Manual Configuration",
+        "description": "Enter your Lionel LionChief locomotive details manually.",
         "data": {
           "mac_address": "Bluetooth MAC address",
           "name": "Name",

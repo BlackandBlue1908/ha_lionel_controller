@@ -21,6 +21,7 @@ from .const import (
     DEFAULT_NAME,
     DEFAULT_SERVICE_UUID,
     DOMAIN,
+    LIONCHIEF_SERVICE_UUID,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -32,6 +33,9 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Optional(CONF_SERVICE_UUID, default=DEFAULT_SERVICE_UUID): str,
     }
 )
+
+# Special value for manual entry option
+MANUAL_ENTRY = "__manual_entry__"
 
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
@@ -94,11 +98,129 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         """Initialize the config flow."""
         self._discovered_devices: dict[str, BluetoothServiceInfoBleak] = {}
+        self._scanned_devices: dict[str, dict[str, Any]] = {}
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the initial step."""
+        """Handle the initial step - scan for devices or manual entry."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            selected = user_input.get("device")
+            
+            if selected == MANUAL_ENTRY:
+                # User wants to enter MAC address manually
+                return await self.async_step_manual()
+            
+            if selected and selected in self._scanned_devices:
+                # User selected a discovered device
+                device_info = self._scanned_devices[selected]
+                
+                # Check if already configured
+                await self.async_set_unique_id(device_info["mac_address"])
+                self._abort_if_unique_id_configured()
+                
+                return self.async_create_entry(
+                    title=device_info["name"],
+                    data={
+                        CONF_MAC_ADDRESS: device_info["mac_address"],
+                        CONF_NAME: device_info["name"],
+                        CONF_SERVICE_UUID: DEFAULT_SERVICE_UUID,
+                    },
+                )
+
+        # Scan for Lionel trains
+        await self._async_scan_for_trains()
+        
+        if not self._scanned_devices:
+            # No devices found, go directly to manual entry
+            return await self.async_step_manual()
+        
+        # Build selection list
+        device_options = {
+            mac: f"{info['name']} ({mac})"
+            for mac, info in self._scanned_devices.items()
+        }
+        device_options[MANUAL_ENTRY] = "Enter MAC address manually..."
+        
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("device"): vol.In(device_options),
+                }
+            ),
+            errors=errors,
+        )
+
+    async def _async_scan_for_trains(self) -> None:
+        """Scan for Lionel LionChief trains via Bluetooth."""
+        self._scanned_devices = {}
+        
+        try:
+            # First, check Home Assistant's Bluetooth cache for known devices
+            service_infos = bluetooth.async_discovered_service_info(self.hass)
+            
+            for service_info in service_infos:
+                # Check if this device has the LionChief service UUID
+                if any(
+                    uuid.lower() == LIONCHIEF_SERVICE_UUID.lower()
+                    for uuid in service_info.service_uuids
+                ):
+                    mac = service_info.address.upper()
+                    
+                    # Skip already configured devices
+                    if self._is_already_configured(mac):
+                        continue
+                    
+                    name = service_info.name or f"Lionel Train {mac[-5:].replace(':', '')}"
+                    self._scanned_devices[mac] = {
+                        "mac_address": mac,
+                        "name": name,
+                    }
+                    _LOGGER.debug("Found Lionel train: %s at %s", name, mac)
+            
+            # If no devices found in cache, try active scanning
+            if not self._scanned_devices:
+                _LOGGER.debug("No trains in cache, performing active scan...")
+                scanner = BleakScanner()
+                devices = await scanner.discover(timeout=10.0)
+                
+                for device in devices:
+                    # Check device metadata for LionChief service
+                    if hasattr(device, 'metadata') and device.metadata:
+                        uuids = device.metadata.get('uuids', [])
+                        if any(
+                            uuid.lower() == LIONCHIEF_SERVICE_UUID.lower()
+                            for uuid in uuids
+                        ):
+                            mac = device.address.upper()
+                            
+                            if self._is_already_configured(mac):
+                                continue
+                            
+                            name = device.name or f"Lionel Train {mac[-5:].replace(':', '')}"
+                            self._scanned_devices[mac] = {
+                                "mac_address": mac,
+                                "name": name,
+                            }
+                            _LOGGER.debug("Found Lionel train via scan: %s at %s", name, mac)
+                            
+        except BleakError as err:
+            _LOGGER.warning("Error scanning for Bluetooth devices: %s", err)
+
+    def _is_already_configured(self, mac_address: str) -> bool:
+        """Check if a device is already configured."""
+        for entry in self._async_current_entries():
+            if entry.data.get(CONF_MAC_ADDRESS, "").upper() == mac_address.upper():
+                return True
+        return False
+
+    async def async_step_manual(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle manual MAC address entry."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -123,7 +245,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 })
 
         return self.async_show_form(
-            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+            step_id="manual", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
         )
 
     async def async_step_bluetooth(

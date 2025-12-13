@@ -164,17 +164,30 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # First, check Home Assistant's Bluetooth cache for known devices
             service_infos = bluetooth.async_discovered_service_info(self.hass)
             
-            _LOGGER.debug("Scanning %d devices from HA Bluetooth cache", len(list(service_infos)))
-            
-            # Re-get the iterator since we consumed it for counting
-            service_infos = bluetooth.async_discovered_service_info(self.hass)
+            _LOGGER.debug("Scanning devices from HA Bluetooth cache")
             
             for service_info in service_infos:
                 device_name = service_info.name or ""
-                _LOGGER.debug("Checking device: name='%s', address=%s", device_name, service_info.address)
                 
-                # Check if device name starts with "LC" (LionChief naming convention)
-                if not device_name.upper().startswith("LC"):
+                # Must have the LionChief service UUID
+                has_lionchief_service = any(
+                    uuid.lower() == LIONCHIEF_SERVICE_UUID.lower()
+                    for uuid in service_info.service_uuids
+                )
+                
+                # Also accept devices with name starting with "LC" as backup
+                name_matches = device_name.upper().startswith("LC")
+                
+                # Log for debugging
+                if has_lionchief_service or name_matches:
+                    _LOGGER.debug(
+                        "Potential train: name='%s', address=%s, has_service=%s, name_match=%s, uuids=%s",
+                        device_name, service_info.address, has_lionchief_service, name_matches,
+                        service_info.service_uuids
+                    )
+                
+                # Require BOTH the LionChief service UUID AND name starting with LC
+                if not (has_lionchief_service and name_matches):
                     continue
                 
                 mac = service_info.address.upper()
@@ -197,9 +210,22 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 devices = await scanner.discover(timeout=10.0)
                 
                 for device in devices:
-                    # Check if device name starts with "LC" (LionChief naming convention)
                     device_name = device.name or ""
-                    if not device_name.upper().startswith("LC"):
+                    
+                    # Check for LionChief service UUID in device metadata
+                    has_lionchief_service = False
+                    if hasattr(device, 'metadata') and device.metadata:
+                        uuids = device.metadata.get('uuids', [])
+                        has_lionchief_service = any(
+                            uuid.lower() == LIONCHIEF_SERVICE_UUID.lower()
+                            for uuid in uuids
+                        )
+                    
+                    # Also check name
+                    name_matches = device_name.upper().startswith("LC")
+                    
+                    # Require BOTH conditions
+                    if not (has_lionchief_service and name_matches):
                         continue
                     
                     mac = device.address.upper()

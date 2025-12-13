@@ -60,6 +60,7 @@ PITCH_MAX = 2
 # Configuration keys
 CONF_MAC_ADDRESS = "mac_address"
 CONF_SERVICE_UUID = "service_uuid"
+CONF_TRAIN_MODEL = "train_model"
 
 # Default values
 DEFAULT_NAME = "Lionel Train"

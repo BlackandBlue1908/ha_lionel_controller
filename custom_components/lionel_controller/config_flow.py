@@ -18,11 +18,13 @@ from homeassistant.exceptions import HomeAssistantError
 from .const import (
     CONF_MAC_ADDRESS,
     CONF_SERVICE_UUID,
+    CONF_TRAIN_MODEL,
     DEFAULT_NAME,
     DEFAULT_SERVICE_UUID,
     DOMAIN,
     LIONCHIEF_SERVICE_UUID,
 )
+from .train_models import TRAIN_MODEL_OPTIONS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -99,6 +101,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self._discovered_devices: dict[str, BluetoothServiceInfoBleak] = {}
         self._scanned_devices: dict[str, dict[str, Any]] = {}
+        self._pending_device: dict[str, Any] | None = None
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -114,21 +117,20 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return await self.async_step_manual()
             
             if selected and selected in self._scanned_devices:
-                # User selected a discovered device
+                # User selected a discovered device - proceed to train model selection
                 device_info = self._scanned_devices[selected]
                 
                 # Check if already configured
                 await self.async_set_unique_id(device_info["mac_address"])
                 self._abort_if_unique_id_configured()
                 
-                return self.async_create_entry(
-                    title=device_info["name"],
-                    data={
-                        CONF_MAC_ADDRESS: device_info["mac_address"],
-                        CONF_NAME: device_info["name"],
-                        CONF_SERVICE_UUID: DEFAULT_SERVICE_UUID,
-                    },
-                )
+                # Store device info and proceed to train model selection
+                self._pending_device = {
+                    CONF_MAC_ADDRESS: device_info["mac_address"],
+                    CONF_NAME: device_info["name"],
+                    CONF_SERVICE_UUID: DEFAULT_SERVICE_UUID,
+                }
+                return await self.async_step_train_model()
 
         # Scan for Lionel trains
         _LOGGER.info("Scanning for Lionel LionChief trains...")
@@ -256,6 +258,37 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="manual", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+        )
+
+    async def async_step_train_model(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle train model selection step."""
+        if user_input is not None:
+            train_model = user_input.get(CONF_TRAIN_MODEL, "Generic")
+            
+            # Create the entry with the selected train model
+            return self.async_create_entry(
+                title=self._pending_device[CONF_NAME],
+                data={
+                    **self._pending_device,
+                    CONF_TRAIN_MODEL: train_model,
+                },
+            )
+
+        # Build train model options
+        model_options = {model: model for model in TRAIN_MODEL_OPTIONS}
+
+        return self.async_show_form(
+            step_id="train_model",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_TRAIN_MODEL, default="Generic"): vol.In(model_options),
+                }
+            ),
+            description_placeholders={
+                "name": self._pending_device[CONF_NAME],
+            },
         )
 
     async def async_step_bluetooth(

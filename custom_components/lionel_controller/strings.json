@@ -8,6 +8,13 @@
           "device": "Lionel Train"
         }
       },
+      "train_model": {
+        "title": "Select Train Model",
+        "description": "Select your train model for **{name}**. This determines the announcement button labels. Choose 'Generic' if your train is not listed.",
+        "data": {
+          "train_model": "Train Model"
+        }
+      },
       "manual": {
         "title": "Manual Configuration",
         "description": "Enter your Lionel LionChief locomotive details manually.",

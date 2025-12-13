@@ -1,10 +1,71 @@
-reload_integration:
-  name: Reload Integration
-  description: Reload the Lionel Train Controller integration for better reconnection.
+set_speed:
+  name: Set Speed
+  description: Set the train speed (0-100%).
   fields:
-    entry_id:
-      name: Entry ID
-      description: The config entry ID to reload (optional - uses current integration if not provided).
-      required: false
+    speed:
+      name: Speed
+      description: Speed percentage (0-100).
+      required: true
+      example: 50
       selector:
-        text:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+
+set_direction:
+  name: Set Direction
+  description: Set the train direction.
+  fields:
+    direction:
+      name: Direction
+      description: Direction of travel.
+      required: true
+      example: "forward"
+      selector:
+        select:
+          options:
+            - "forward"
+            - "reverse"
+
+stop:
+  name: Stop
+  description: Stop the train immediately.
+
+horn:
+  name: Horn
+  description: Sound the train horn.
+
+bell:
+  name: Bell
+  description: Ring the train bell.
+
+lights_on:
+  name: Lights On
+  description: Turn on the train lights.
+
+lights_off:
+  name: Lights Off
+  description: Turn off the train lights.
+
+play_announcement:
+  name: Play Announcement
+  description: Play a train announcement.
+  fields:
+    announcement:
+      name: Announcement Code
+      description: The announcement code to play.
+      required: true
+      example: 1
+      selector:
+        number:
+          min: 0
+          max: 255
+
+connect:
+  name: Connect
+  description: Connect to the train.
+
+disconnect:
+  name: Disconnect
+  description: Disconnect from the train.

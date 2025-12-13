@@ -29,6 +29,7 @@ async def async_setup_entry(
         LionelTrainStatusSensor(coordinator, name),
         LionelTrainModelSensor(coordinator, name, train_model),
         LionelTrainDirectionSensor(coordinator, name),
+        LionelTrainDiagnosticsSensor(coordinator, name),
     ], True)
 
 
@@ -138,3 +139,53 @@ class LionelTrainDirectionSensor(SensorEntity):
     def available(self) -> bool:
         """Return True if entity is available."""
         return self._coordinator.connected
+
+
+class LionelTrainDiagnosticsSensor(SensorEntity):
+    """Sensor for Lionel Train diagnostics and error tracking."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Diagnostics"
+    _attr_icon = "mdi:bug"
+
+    def __init__(self, coordinator: LionelTrainCoordinator, device_name: str) -> None:
+        """Initialize the sensor."""
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{coordinator.mac_address}_diagnostics"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, coordinator.mac_address)},
+            "name": device_name,
+        }
+        self._coordinator.add_update_callback(self.async_write_ha_state)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Entity being removed from hass."""
+        self._coordinator.remove_update_callback(self.async_write_ha_state)
+
+    @property
+    def native_value(self) -> str:
+        """Return the diagnostic status."""
+        if self._coordinator.last_error:
+            return "Error"
+        elif self._coordinator.connected:
+            return "OK"
+        else:
+            return "Disconnected"
+
+    @property
+    def available(self) -> bool:
+        """Return True - diagnostics are always available."""
+        return True
+
+    @property
+    def extra_state_attributes(self) -> dict[str, any]:
+        """Return diagnostic attributes."""
+        return {
+            "last_error": self._coordinator.last_error,
+            "last_error_time": self._coordinator.last_error_time,
+            "connection_attempts": self._coordinator.connection_attempts,
+            "successful_commands": self._coordinator.successful_commands,
+            "failed_commands": self._coordinator.failed_commands,
+            "connected": self._coordinator.connected,
+            "auto_reconnect_enabled": self._coordinator.auto_reconnect_enabled,
+        }

@@ -28,6 +28,7 @@ async def async_setup_entry(
     async_add_entities([
         LionelTrainStatusSensor(coordinator, name),
         LionelTrainModelSensor(coordinator, name, train_model),
+        LionelTrainDirectionSensor(coordinator, name),
     ], True)
 
 
@@ -105,3 +106,35 @@ class LionelTrainModelSensor(SensorEntity):
     def available(self) -> bool:
         """Return True - this sensor is always available."""
         return True
+
+
+class LionelTrainDirectionSensor(SensorEntity):
+    """Sensor for Lionel Train direction (forward/reverse)."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Direction"
+    _attr_icon = "mdi:arrow-left-right"
+
+    def __init__(self, coordinator: LionelTrainCoordinator, device_name: str) -> None:
+        """Initialize the sensor."""
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{coordinator.mac_address}_direction"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, coordinator.mac_address)},
+            "name": device_name,
+        }
+        self._coordinator.add_update_callback(self.async_write_ha_state)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Entity being removed from hass."""
+        self._coordinator.remove_update_callback(self.async_write_ha_state)
+
+    @property
+    def native_value(self) -> str:
+        """Return the direction as forward or reverse."""
+        return "forward" if self._coordinator.direction_forward else "reverse"
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return self._coordinator.connected

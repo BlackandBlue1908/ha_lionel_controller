@@ -250,11 +250,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(info["mac_address"])
                 self._abort_if_unique_id_configured()
                 
-                return self.async_create_entry(title=info["title"], data={
+                # Store device info and proceed to train model selection
+                self._pending_device = {
                     CONF_MAC_ADDRESS: info["mac_address"],
                     CONF_NAME: info["title"],
                     CONF_SERVICE_UUID: info["service_uuid"],
-                })
+                }
+                return await self.async_step_train_model()
 
         return self.async_show_form(
             step_id="manual", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
@@ -331,14 +333,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 mac_suffix = discovery_info.address[-5:].replace(":", "")
                 device_name = f"Lionel Train {mac_suffix}"
             
-            return self.async_create_entry(
-                title=device_name,
-                data={
-                    CONF_MAC_ADDRESS: discovery_info.address,
-                    CONF_NAME: device_name,
-                    CONF_SERVICE_UUID: DEFAULT_SERVICE_UUID,
-                },
-            )
+            # Store device info and proceed to train model selection
+            self._pending_device = {
+                CONF_MAC_ADDRESS: discovery_info.address,
+                CONF_NAME: device_name,
+                CONF_SERVICE_UUID: DEFAULT_SERVICE_UUID,
+            }
+            return await self.async_step_train_model()
 
         # Show confirmation form with device details
         discovery_info = self._discovered_devices[self.unique_id]

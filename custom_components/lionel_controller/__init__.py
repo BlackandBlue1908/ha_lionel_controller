@@ -189,7 +189,9 @@ class LionelTrainCoordinator:
     @property
     def connected(self) -> bool:
         """Return True if connected to the train."""
-        return self._connected and self._client is not None and self._client.is_connected
+        # Use our internal flag as the primary source of truth
+        # The _client.is_connected can lag behind our state
+        return self._connected
 
     @property
     def speed(self) -> int:

@@ -169,26 +169,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             for service_info in service_infos:
                 device_name = service_info.name or ""
                 
-                # Must have the LionChief service UUID
-                has_lionchief_service = any(
-                    uuid.lower() == LIONCHIEF_SERVICE_UUID.lower()
-                    for uuid in service_info.service_uuids
-                )
-                
-                # Also accept devices with name starting with "LC" as backup
-                name_matches = device_name.upper().startswith("LC")
-                
-                # Log for debugging
-                if has_lionchief_service or name_matches:
-                    _LOGGER.debug(
-                        "Potential train: name='%s', address=%s, has_service=%s, name_match=%s, uuids=%s",
-                        device_name, service_info.address, has_lionchief_service, name_matches,
-                        service_info.service_uuids
-                    )
-                
-                # Require BOTH the LionChief service UUID AND name starting with LC
-                if not (has_lionchief_service and name_matches):
+                # Only show devices with name starting with "LC" (LionChief naming convention)
+                # This is the most reliable filter as the service UUID may not always be advertised
+                if not device_name.upper().startswith("LC"):
                     continue
+                
+                _LOGGER.debug(
+                    "Found LC device: name='%s', address=%s, uuids=%s",
+                    device_name, service_info.address, service_info.service_uuids
+                )
                 
                 mac = service_info.address.upper()
                 
@@ -212,20 +201,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 for device in devices:
                     device_name = device.name or ""
                     
-                    # Check for LionChief service UUID in device metadata
-                    has_lionchief_service = False
-                    if hasattr(device, 'metadata') and device.metadata:
-                        uuids = device.metadata.get('uuids', [])
-                        has_lionchief_service = any(
-                            uuid.lower() == LIONCHIEF_SERVICE_UUID.lower()
-                            for uuid in uuids
-                        )
-                    
-                    # Also check name
-                    name_matches = device_name.upper().startswith("LC")
-                    
-                    # Require BOTH conditions
-                    if not (has_lionchief_service and name_matches):
+                    # Only show devices with name starting with "LC"
+                    if not device_name.upper().startswith("LC"):
                         continue
                     
                     mac = device.address.upper()

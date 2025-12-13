@@ -132,10 +132,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
                 return await self.async_step_train_model()
 
-        # Scan for Lionel trains
-        _LOGGER.info("Scanning for Lionel LionChief trains...")
-        await self._async_scan_for_trains()
-        _LOGGER.info("Scan complete. Found %d trains.", len(self._scanned_devices))
+        # Only scan if we haven't scanned yet (avoid re-scanning on form re-render)
+        if not self._scanned_devices:
+            _LOGGER.info("Scanning for Lionel LionChief trains...")
+            await self._async_scan_for_trains()
+            _LOGGER.info("Scan complete. Found %d trains.", len(self._scanned_devices))
         
         # Build selection list - always show the form with manual entry option
         device_options = {

@@ -59,11 +59,11 @@ class LionelTrainButtonBase(ButtonEntity):
 
     async def async_added_to_hass(self) -> None:
         """Run when entity is added to hass."""
-        self._coordinator.register_callback(self._handle_coordinator_update)
+        self._coordinator.add_update_callback(self._handle_coordinator_update)
 
     async def async_will_remove_from_hass(self) -> None:
         """Run when entity is removed from hass."""
-        self._coordinator.unregister_callback(self._handle_coordinator_update)
+        self._coordinator.remove_update_callback(self._handle_coordinator_update)
 
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
@@ -94,11 +94,11 @@ class LionelTrainConnectButton(ButtonEntity):
 
     async def async_added_to_hass(self) -> None:
         """Run when entity is added to hass."""
-        self._coordinator.register_callback(self._handle_coordinator_update)
+        self._coordinator.add_update_callback(self._handle_coordinator_update)
 
     async def async_will_remove_from_hass(self) -> None:
         """Run when entity is removed from hass."""
-        self._coordinator.unregister_callback(self._handle_coordinator_update)
+        self._coordinator.remove_update_callback(self._handle_coordinator_update)
 
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""

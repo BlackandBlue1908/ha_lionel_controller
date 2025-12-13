@@ -506,6 +506,9 @@ class LionelTrainCoordinator:
                     _LOGGER.info("Set up notifications on %s", notify_char_uuid)
                 except BleakError as err:
                     _LOGGER.debug("Could not set up notifications (train may not support them): %s", err)
+                
+                # Notify all entities that connection state changed
+                self._notify_state_change()
 
             except BleakError as err:
                 _LOGGER.error("Failed to connect to train: %s", err)

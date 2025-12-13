@@ -190,8 +190,11 @@ class LionelTrainHornButton(LionelTrainButtonBase):
         self._attr_unique_id = f"{coordinator.mac_address}_horn"
 
     async def async_press(self) -> None:
-        """Press the button to sound horn."""
+        """Press the button to sound horn (short blast)."""
+        import asyncio
         await self._coordinator.async_set_horn(True)
+        await asyncio.sleep(0.3)  # Short horn blast
+        await self._coordinator.async_set_horn(False)
 
 
 class LionelTrainBellButton(LionelTrainButtonBase):
@@ -206,8 +209,11 @@ class LionelTrainBellButton(LionelTrainButtonBase):
         self._attr_unique_id = f"{coordinator.mac_address}_bell"
 
     async def async_press(self) -> None:
-        """Press the button to ring bell."""
+        """Press the button to ring bell (short ring)."""
+        import asyncio
         await self._coordinator.async_set_bell(True)
+        await asyncio.sleep(0.3)  # Short bell ring
+        await self._coordinator.async_set_bell(False)
 
 
 class LionelTrainAnnouncementButton(LionelTrainButtonBase):

@@ -750,6 +750,7 @@ class LionelTrainCoordinator:
         success = await self.async_send_command(command)
         if success:
             self._direction_forward = forward
+            self._notify_state_change()
         return success
 
     async def async_set_lights(self, on: bool) -> bool:

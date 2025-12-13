@@ -25,6 +25,7 @@ async def async_setup_entry(
     name = config_entry.data[CONF_NAME]
     
     buttons = [
+        LionelTrainConnectButton(coordinator, name),
         LionelTrainDisconnectButton(coordinator, name),
         LionelTrainStopButton(coordinator, name),
         LionelTrainForwardButton(coordinator, name),
@@ -72,6 +73,45 @@ class LionelTrainButtonBase(ButtonEntity):
     def available(self) -> bool:
         """Return True if entity is available."""
         return self._coordinator.connected
+
+
+class LionelTrainConnectButton(ButtonEntity):
+    """Button for connecting to the train."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Connect"
+    _attr_icon = "mdi:bluetooth-connect"
+
+    def __init__(self, coordinator: LionelTrainCoordinator, device_name: str) -> None:
+        """Initialize the connect button."""
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{coordinator.mac_address}_connect"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, coordinator.mac_address)},
+            "name": device_name,
+            **coordinator.device_info,
+        }
+
+    async def async_added_to_hass(self) -> None:
+        """Run when entity is added to hass."""
+        self._coordinator.register_callback(self._handle_coordinator_update)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Run when entity is removed from hass."""
+        self._coordinator.unregister_callback(self._handle_coordinator_update)
+
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        self.async_write_ha_state()
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available (always available for connect)."""
+        return True
+
+    async def async_press(self) -> None:
+        """Press the button to connect."""
+        await self._coordinator.async_force_reconnect()
 
 
 class LionelTrainDisconnectButton(LionelTrainButtonBase):

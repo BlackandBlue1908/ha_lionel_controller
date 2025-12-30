@@ -44,6 +44,15 @@ TRAIN_MODELS = {
         "fastest_freight": "First Gift",
         "penna_flyer": "The King",
     },
+    "Thomas The Tank Engine": {
+        "random": "Random",
+        "all_aboard": "All Aboard",
+        "full_steam_ahead": "Full Steam Ahead!",
+        "number_1_engine": "Number 1 Engine",
+        "rocking_the_rails": "Rocking the Rails",
+        "oh_yeah": "Oh Yeah!",
+        "on_track_and_on_time": "On Track and On Time!",
+    },
     
     # Add more train models below!
     # Example:

@@ -218,6 +218,7 @@ async def test_device_info_from_gatt(
         client.read_gatt_char.side_effect = lambda uuid: {
             "00002a26-0000-1000-8000-00805f9b34fb": b"1.4\x00",
             "00002a25-0000-1000-8000-00805f9b34fb": b"SN123",
+            "00002a27-0000-1000-8000-00805f9b34fb": b"Hardware Revision",
         }.get(uuid, b"")
         return client
 
@@ -226,6 +227,7 @@ async def test_device_info_from_gatt(
     device = device_registry.async_get_device(identifiers={("lionel_controller", config_entry.unique_id)})
     assert device.sw_version == "1.4"
     assert device.serial_number == "SN123"
+    assert device.hw_version is None  # placeholder text from the firmware is dropped
     assert device.manufacturer == "Lionel"
 
 

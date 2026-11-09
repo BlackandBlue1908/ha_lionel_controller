@@ -68,6 +68,11 @@ DEVICE_INFO_CHARS = {
     MANUFACTURER_NAME_CHAR_UUID: "manufacturer_name",
 }
 
+PLACEHOLDER_VALUES = {
+    "model number", "serial number", "firmware revision", "hardware revision",
+    "software revision", "manufacturer name",
+}
+
 SOUND_SOURCES = {
     SOUND_SOURCE_HORN: "horn_volume",
     SOUND_SOURCE_BELL: "bell_volume",
@@ -369,7 +374,8 @@ class LionelTrainCoordinator:
             except BleakError:
                 continue
             value = raw.decode("utf-8", errors="ignore").strip("\x00 ").strip()
-            if value:
+            # LionChief firmware answers with the field's own name ("Serial Number").
+            if value and value.lower() not in PLACEHOLDER_VALUES:
                 self.stats.gatt_info[key] = value
 
         info = self.stats.gatt_info

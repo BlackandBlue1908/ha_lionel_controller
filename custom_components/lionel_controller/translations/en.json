@@ -71,6 +71,12 @@
       },
       "auto_reconnect": {
         "name": "Auto Reconnect"
+      },
+      "horn_sound": {
+        "name": "Horn sound"
+      },
+      "bell_ringing": {
+        "name": "Bell ringing"
       }
     },
     "button": {

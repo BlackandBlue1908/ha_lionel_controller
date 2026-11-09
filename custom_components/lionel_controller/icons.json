@@ -29,6 +29,15 @@
       },
       "auto_reconnect": {
         "default": "mdi:bluetooth-connect"
+      },
+      "horn_sound": {
+        "default": "mdi:bullhorn"
+      },
+      "bell_ringing": {
+        "default": "mdi:bell",
+        "state": {
+          "on": "mdi:bell-ring"
+        }
       }
     },
     "button": {

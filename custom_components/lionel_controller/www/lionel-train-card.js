@@ -1,519 +1,130 @@
-/**
- * Lionel Train Controller Card
- * A custom Lovelace card for controlling Lionel LionChief trains
- */
-
-class LionelTrainCard extends HTMLElement {
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-  }
-
-  set hass(hass) {
-    this._hass = hass;
-    this._updateCard();
-  }
-
-  setConfig(config) {
-    if (!config.entity) {
-      throw new Error('You need to define an entity (the throttle number entity)');
-    }
-    this._config = config;
-    this._entityBase = config.entity.replace('_throttle', '').replace('number.', '');
-    this._render();
-  }
-
-  _getEntityId(suffix) {
-    return `${this._entityBase}_${suffix}`;
-  }
-
-  _render() {
-    this.shadowRoot.innerHTML = `
-      <style>
-        :host {
-          --card-bg: var(--ha-card-background, var(--card-background-color, white));
-          --primary-color: var(--primary-color, #03a9f4);
-          --text-color: var(--primary-text-color, #212121);
-          --secondary-text: var(--secondary-text-color, #727272);
-        }
-        
-        .card {
-          background: var(--card-bg);
-          border-radius: 12px;
-          padding: 16px;
-          font-family: var(--paper-font-body1_-_font-family, 'Roboto', sans-serif);
-        }
-        
-        .header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 16px;
-        }
-        
-        .title {
-          font-size: 1.2em;
-          font-weight: 500;
-          color: var(--text-color);
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-        
-        .title svg {
-          width: 24px;
-          height: 24px;
-        }
-        
-        .status {
-          font-size: 0.85em;
-          padding: 4px 12px;
-          border-radius: 12px;
-          font-weight: 500;
-        }
-        
-        .status.connected {
-          background: #4caf50;
-          color: white;
-        }
-        
-        .status.disconnected {
-          background: #f44336;
-          color: white;
-        }
-        
-        .throttle-section {
-          margin: 20px 0;
-        }
-        
-        .throttle-label {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 8px;
-          color: var(--text-color);
-        }
-        
-        .speed-value {
-          font-size: 2em;
-          font-weight: bold;
-          color: var(--primary-color);
-        }
-        
-        .throttle-slider {
-          width: 100%;
-          height: 40px;
-          -webkit-appearance: none;
-          appearance: none;
-          background: linear-gradient(to right, #4caf50, #ffeb3b, #f44336);
-          border-radius: 20px;
-          outline: none;
-          cursor: pointer;
-        }
-        
-        .throttle-slider::-webkit-slider-thumb {
-          -webkit-appearance: none;
-          appearance: none;
-          width: 50px;
-          height: 50px;
-          background: white;
-          border: 4px solid var(--primary-color);
-          border-radius: 50%;
-          cursor: grab;
-          box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-        }
-        
-        .throttle-slider::-moz-range-thumb {
-          width: 50px;
-          height: 50px;
-          background: white;
-          border: 4px solid var(--primary-color);
-          border-radius: 50%;
-          cursor: grab;
-          box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-        }
-        
-        .controls {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 8px;
-          margin-top: 16px;
-        }
-        
-        .control-btn {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          padding: 12px 8px;
-          border: none;
-          border-radius: 12px;
-          background: var(--ha-card-background, #f5f5f5);
-          color: var(--text-color);
-          cursor: pointer;
-          transition: all 0.2s ease;
-          min-height: 70px;
-        }
-        
-        .control-btn:hover {
-          background: var(--primary-color);
-          color: white;
-          transform: scale(1.02);
-        }
-        
-        .control-btn:active {
-          transform: scale(0.98);
-        }
-        
-        .control-btn.active {
-          background: var(--primary-color);
-          color: white;
-        }
-        
-        .control-btn svg {
-          width: 28px;
-          height: 28px;
-          margin-bottom: 4px;
-        }
-        
-        .control-btn span {
-          font-size: 0.75em;
-          font-weight: 500;
-        }
-        
-        .direction-section {
-          display: flex;
-          gap: 8px;
-          margin-top: 16px;
-        }
-        
-        .direction-btn {
-          flex: 1;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          padding: 16px;
-          border: 2px solid var(--primary-color);
-          border-radius: 12px;
-          background: transparent;
-          color: var(--primary-color);
-          font-size: 1em;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-        
-        .direction-btn:hover, .direction-btn.active {
-          background: var(--primary-color);
-          color: white;
-        }
-        
-        .direction-btn svg {
-          width: 24px;
-          height: 24px;
-        }
-        
-        .stop-btn {
-          width: 100%;
-          padding: 16px;
-          margin-top: 16px;
-          border: none;
-          border-radius: 12px;
-          background: #f44336;
-          color: white;
-          font-size: 1.1em;
-          font-weight: bold;
-          cursor: pointer;
-          transition: all 0.2s ease;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-        }
-        
-        .stop-btn:hover {
-          background: #d32f2f;
-          transform: scale(1.02);
-        }
-        
-        .stop-btn:active {
-          transform: scale(0.98);
-        }
-        
-        .stop-btn svg {
-          width: 24px;
-          height: 24px;
-        }
-        
-        .unavailable {
-          opacity: 0.5;
-          pointer-events: none;
-        }
-      </style>
-      
-      <ha-card>
-        <div class="card">
-          <div class="header">
-            <div class="title">
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12,4L3,7L4.5,8.5L3,10V11H21V10L19.5,8.5L21,7L12,4M3,12V15H5V19H3V21H21V19H19V15H21V12H3M7,15H9V19H7V15M11,15H13V19H11V15M15,15H17V19H15V15Z"/>
-              </svg>
-              <span>${this._config.name || 'Lionel Train'}</span>
-            </div>
-            <div class="status disconnected" id="status">Disconnected</div>
-          </div>
-          
-          <div class="throttle-section">
-            <div class="throttle-label">
-              <span>Throttle</span>
-              <span class="speed-value" id="speed-display">0%</span>
-            </div>
-            <input type="range" class="throttle-slider" id="throttle" min="0" max="100" value="0">
-          </div>
-          
-          <div class="direction-section">
-            <button class="direction-btn" id="btn-reverse">
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
-              </svg>
-              Reverse
-            </button>
-            <button class="direction-btn" id="btn-forward">
-              Forward
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <path d="M4,11V13H16L10.5,18.5L11.92,19.92L19.84,12L11.92,4.08L10.5,5.5L16,11H4Z"/>
-              </svg>
-            </button>
-          </div>
-          
-          <div class="controls">
-            <button class="control-btn" id="btn-lights">
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12,2A7,7 0 0,0 5,9C5,11.38 6.19,13.47 8,14.74V17A1,1 0 0,0 9,18H15A1,1 0 0,0 16,17V14.74C17.81,13.47 19,11.38 19,9A7,7 0 0,0 12,2M9,21A1,1 0 0,0 10,22H14A1,1 0 0,0 15,21V20H9V21Z"/>
-              </svg>
-              <span>Lights</span>
-            </button>
-            <button class="control-btn" id="btn-horn">
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12,1C7,1 3,5 3,10V17A3,3 0 0,0 6,20H9V12H5V10A7,7 0 0,1 12,3A7,7 0 0,1 19,10V12H15V20H18A3,3 0 0,0 21,17V10C21,5 17,1 12,1Z"/>
-              </svg>
-              <span>Horn</span>
-            </button>
-            <button class="control-btn" id="btn-bell">
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <path d="M21,19V20H3V19L5,17V11C5,7.9 7.03,5.17 10,4.29C10,4.19 10,4.1 10,4A2,2 0 0,1 12,2A2,2 0 0,1 14,4C14,4.1 14,4.19 14,4.29C16.97,5.17 19,7.9 19,11V17L21,19M14,21A2,2 0 0,1 12,23A2,2 0 0,1 10,21"/>
-              </svg>
-              <span>Bell</span>
-            </button>
-            <button class="control-btn" id="btn-disconnect">
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <path d="M13,8A4,4 0 0,1 9,12A4,4 0 0,1 5,8A4,4 0 0,1 9,4A4,4 0 0,1 13,8M17,18V20H1V18C1,15.79 4.58,14 9,14C13.42,14 17,15.79 17,18M20.5,14.5V16H19V14.5H20.5M18.5,9.5H17V9A3,3 0 0,1 20,6A3,3 0 0,1 23,9C23,9.97 22.5,10.88 21.71,11.41L21.41,11.6C20.84,12 20.5,12.61 20.5,13.3V13.5H19V13.3C19,12.11 19.6,11 20.59,10.35L20.88,10.16C21.27,9.9 21.5,9.47 21.5,9A1.5,1.5 0 0,0 20,7.5A1.5,1.5 0 0,0 18.5,9V9.5Z"/>
-              </svg>
-              <span>Disconnect</span>
-            </button>
-          </div>
-          
-          <button class="stop-btn" id="btn-stop">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M18,18H6V6H18V18Z"/>
-            </svg>
-            EMERGENCY STOP
-          </button>
-        </div>
-      </ha-card>
-    `;
-
-    this._setupEventListeners();
-  }
-
-  _setupEventListeners() {
-    const throttle = this.shadowRoot.getElementById('throttle');
-    const btnStop = this.shadowRoot.getElementById('btn-stop');
-    const btnForward = this.shadowRoot.getElementById('btn-forward');
-    const btnReverse = this.shadowRoot.getElementById('btn-reverse');
-    const btnLights = this.shadowRoot.getElementById('btn-lights');
-    const btnHorn = this.shadowRoot.getElementById('btn-horn');
-    const btnBell = this.shadowRoot.getElementById('btn-bell');
-    const btnDisconnect = this.shadowRoot.getElementById('btn-disconnect');
-
-    // Throttle slider
-    throttle.addEventListener('input', (e) => {
-      this._setThrottle(parseInt(e.target.value));
-    });
-
-    // Stop button
-    btnStop.addEventListener('click', () => {
-      this._pressButton('stop');
-      throttle.value = 0;
-      this.shadowRoot.getElementById('speed-display').textContent = '0%';
-    });
-
-    // Direction buttons
-    btnForward.addEventListener('click', () => this._pressButton('forward'));
-    btnReverse.addEventListener('click', () => this._pressButton('reverse'));
-
-    // Control buttons
-    btnLights.addEventListener('click', () => this._toggleSwitch('lights'));
-    btnHorn.addEventListener('click', () => this._pressButton('horn'));
-    btnBell.addEventListener('click', () => this._pressButton('bell'));
-    btnDisconnect.addEventListener('click', () => this._pressButton('disconnect'));
-  }
-
-  _setThrottle(value) {
-    const entityId = `number.${this._getEntityId('throttle')}`;
-    this._hass.callService('number', 'set_value', {
-      entity_id: entityId,
-      value: value
-    });
-    this.shadowRoot.getElementById('speed-display').textContent = `${value}%`;
-  }
-
-  _pressButton(action) {
-    const entityId = `button.${this._getEntityId(action)}`;
-    this._hass.callService('button', 'press', {
-      entity_id: entityId
-    });
-  }
-
-  _toggleSwitch(action) {
-    const entityId = `switch.${this._getEntityId(action)}`;
-    this._hass.callService('switch', 'toggle', {
-      entity_id: entityId
-    });
-  }
-
-  _updateCard() {
-    if (!this._hass || !this._config) return;
-
-    // Update connection status
-    const connectionEntity = `binary_sensor.${this._getEntityId('connected')}`;
-    const connectionState = this._hass.states[connectionEntity];
-    const statusEl = this.shadowRoot.getElementById('status');
-    
-    if (connectionState) {
-      const isConnected = connectionState.state === 'on';
-      statusEl.textContent = isConnected ? 'Connected' : 'Disconnected';
-      statusEl.className = `status ${isConnected ? 'connected' : 'disconnected'}`;
-      
-      // Disable controls if disconnected
-      const card = this.shadowRoot.querySelector('.card');
-      if (!isConnected) {
-        card.classList.add('unavailable');
-      } else {
-        card.classList.remove('unavailable');
-      }
-    }
-
-    // Update throttle value
-    const throttleEntity = `number.${this._getEntityId('throttle')}`;
-    const throttleState = this._hass.states[throttleEntity];
-    if (throttleState) {
-      const value = parseFloat(throttleState.state) || 0;
-      this.shadowRoot.getElementById('throttle').value = value;
-      this.shadowRoot.getElementById('speed-display').textContent = `${Math.round(value)}%`;
-    }
-
-    // Update lights button state
-    const lightsEntity = `switch.${this._getEntityId('lights')}`;
-    const lightsState = this._hass.states[lightsEntity];
-    const lightsBtn = this.shadowRoot.getElementById('btn-lights');
-    if (lightsState && lightsBtn) {
-      if (lightsState.state === 'on') {
-        lightsBtn.classList.add('active');
-      } else {
-        lightsBtn.classList.remove('active');
-      }
-    }
-  }
-
-  getCardSize() {
-    return 5;
-  }
-
-  static getConfigElement() {
-    return document.createElement('lionel-train-card-editor');
-  }
-
-  static getStubConfig() {
-    return {
-      entity: 'number.lionel_train_throttle',
-      name: 'Lionel Train'
-    };
-  }
+var x="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z";var l="M4,11V13H16L10.5,18.5L11.92,19.92L19.84,12L11.92,4.08L10.5,5.5L16,11H4Z";var n="M21,19V20H3V19L5,17V11C5,7.9 7.03,5.17 10,4.29C10,4.19 10,4.1 10,4A2,2 0 0,1 12,2A2,2 0 0,1 14,4C14,4.1 14,4.19 14,4.29C16.97,5.17 19,7.9 19,11V17L21,19M14,21A2,2 0 0,1 12,23A2,2 0 0,1 10,21";var P="M21,19V20H3V19L5,17V11C5,7.9 7.03,5.17 10,4.29C10,4.19 10,4.1 10,4A2,2 0 0,1 12,2A2,2 0 0,1 14,4C14,4.1 14,4.19 14,4.29C16.97,5.17 19,7.9 19,11V17L21,19M14,21A2,2 0 0,1 12,23A2,2 0 0,1 10,21M19.75,3.19L18.33,4.61C20.04,6.3 21,8.6 21,11H23C23,8.07 21.84,5.25 19.75,3.19M1,11H3C3,8.6 3.96,6.3 5.67,4.61L4.25,3.19C2.16,5.25 1,8.07 1,11Z";var w="M19,10L17,12L19,14L21,12M14.88,16.29L13,18.17V14.41M13,5.83L14.88,7.71L13,9.58M17.71,7.71L12,2H11V9.58L6.41,5L5,6.41L10.59,12L5,17.58L6.41,19L11,14.41V22H12L17.71,16.29L13.41,12M7,12L5,10L3,12L5,14L7,12Z",b="M13,5.83L14.88,7.71L13.28,9.31L14.69,10.72L17.71,7.7L12,2H11V7.03L13,9.03M5.41,4L4,5.41L10.59,12L5,17.59L6.41,19L11,14.41V22H12L16.29,17.71L18.59,20L20,18.59M13,18.17V14.41L14.88,16.29";var T="M12,8H4A2,2 0 0,0 2,10V14A2,2 0 0,0 4,16H5V20A1,1 0 0,0 6,21H8A1,1 0 0,0 9,20V16H12L17,20V4L12,8M21.5,12C21.5,13.71 20.54,15.26 19,16V8C20.53,8.75 21.5,10.3 21.5,12Z";var F="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z";var y="M19.78,3H11.22C10.55,3 10,3.55 10,4.22V8H16V14H19.78C20.45,14 21,13.45 21,12.78V4.22C21,3.55 20.45,3 19.78,3M12.44,6.67C11.76,6.67 11.21,6.12 11.21,5.44C11.21,4.76 11.76,4.21 12.44,4.21A1.23,1.23 0 0,1 13.67,5.44C13.67,6.12 13.12,6.67 12.44,6.67M18.56,12.78C17.88,12.79 17.33,12.24 17.32,11.56C17.31,10.88 17.86,10.33 18.54,10.32C19.22,10.31 19.77,10.86 19.78,11.56C19.77,12.23 19.23,12.77 18.56,12.78M18.56,6.67C17.88,6.68 17.33,6.13 17.32,5.45C17.31,4.77 17.86,4.22 18.54,4.21C19.22,4.2 19.77,4.75 19.78,5.44C19.78,6.12 19.24,6.66 18.56,6.67M4.22,10H12.78A1.22,1.22 0 0,1 14,11.22V19.78C14,20.45 13.45,21 12.78,21H4.22C3.55,21 3,20.45 3,19.78V11.22C3,10.55 3.55,10 4.22,10M8.5,14.28C7.83,14.28 7.28,14.83 7.28,15.5C7.28,16.17 7.83,16.72 8.5,16.72C9.17,16.72 9.72,16.17 9.72,15.5A1.22,1.22 0 0,0 8.5,14.28M5.44,11.22C4.77,11.22 4.22,11.77 4.22,12.44A1.22,1.22 0 0,0 5.44,13.66C6.11,13.66 6.66,13.11 6.66,12.44V12.44C6.66,11.77 6.11,11.22 5.44,11.22M11.55,17.33C10.88,17.33 10.33,17.88 10.33,18.55C10.33,19.22 10.88,19.77 11.55,19.77A1.22,1.22 0 0,0 12.77,18.55H12.77C12.77,17.88 12.23,17.34 11.56,17.33H11.55Z";var R="M12,2C9.76,2 7.78,3.05 6.5,4.68L16.31,14.5C17.94,13.21 19,11.24 19,9A7,7 0 0,0 12,2M3.28,4L2,5.27L5.04,8.3C5,8.53 5,8.76 5,9C5,11.38 6.19,13.47 8,14.74V17A1,1 0 0,0 9,18H14.73L18.73,22L20,20.72L3.28,4M9,20V21A1,1 0 0,0 10,22H14A1,1 0 0,0 15,21V20H9Z";var m="M12,6A6,6 0 0,1 18,12C18,14.22 16.79,16.16 15,17.2V19A1,1 0 0,1 14,20H10A1,1 0 0,1 9,19V17.2C7.21,16.16 6,14.22 6,12A6,6 0 0,1 12,6M14,21V22A1,1 0 0,1 13,23H11A1,1 0 0,1 10,22V21H14M20,11H23V13H20V11M1,11H4V13H1V11M13,1V4H11V1H13M4.92,3.5L7.05,5.64L5.63,7.05L3.5,4.93L4.92,3.5M16.95,5.63L19.07,3.5L20.5,4.93L18.37,7.05L16.95,5.63Z";var D="M12,2C8,2 4,2.5 4,6V15.5A3.5,3.5 0 0,0 7.5,19L6,20.5V21H8.23L10.23,19H14L16,21H18V20.5L16.5,19A3.5,3.5 0 0,0 20,15.5V6C20,2.5 16.42,2 12,2M7.5,17A1.5,1.5 0 0,1 6,15.5A1.5,1.5 0 0,1 7.5,14A1.5,1.5 0 0,1 9,15.5A1.5,1.5 0 0,1 7.5,17M11,10H6V6H11V10M13,10V6H18V10H13M16.5,17A1.5,1.5 0 0,1 15,15.5A1.5,1.5 0 0,1 16.5,14A1.5,1.5 0 0,1 18,15.5A1.5,1.5 0 0,1 16.5,17Z";var E="M17.75,4.09L15.22,6.03L16.13,9.09L13.5,7.28L10.87,9.09L11.78,6.03L9.25,4.09L12.44,4L13.5,1L14.56,4L17.75,4.09M21.25,11L19.61,12.25L20.2,14.23L18.5,13.06L16.8,14.23L17.39,12.25L15.75,11L17.81,10.95L18.5,9L19.19,10.95L21.25,11M18.97,15.95C19.8,15.87 20.69,17.05 20.16,17.8C19.84,18.25 19.5,18.67 19.08,19.07C15.17,23 8.84,23 4.94,19.07C1.03,15.17 1.03,8.83 4.94,4.93C5.34,4.53 5.76,4.17 6.21,3.85C6.96,3.32 8.14,4.21 8.06,5.04C7.79,7.9 8.75,10.87 10.95,13.06C13.14,15.26 16.1,16.22 18.97,15.95M17.33,17.97C14.5,17.81 11.7,16.64 9.53,14.5C7.36,12.31 6.2,9.5 6.04,6.68C3.23,9.82 3.34,14.64 6.35,17.66C9.37,20.67 14.19,20.78 17.33,17.97Z";var W="M12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,2L14.39,5.42C13.65,5.15 12.84,5 12,5C11.16,5 10.35,5.15 9.61,5.42L12,2M3.34,7L7.5,6.65C6.9,7.16 6.36,7.78 5.94,8.5C5.5,9.24 5.25,10 5.11,10.79L3.34,7M3.36,17L5.12,13.23C5.26,14 5.53,14.78 5.95,15.5C6.37,16.24 6.91,16.86 7.5,17.37L3.36,17M20.65,7L18.88,10.79C18.74,10 18.47,9.23 18.05,8.5C17.63,7.78 17.1,7.15 16.5,6.64L20.65,7M20.64,17L16.5,17.36C17.09,16.85 17.62,16.22 18.04,15.5C18.46,14.77 18.73,14 18.87,13.21L20.64,17M12,22L9.59,18.56C10.33,18.83 11.14,19 12,19C12.82,19 13.63,18.83 14.37,18.56L12,22Z";var _="3.0.0",S={Generic:{random:"Random",ready_to_roll:"Ready to Roll",hey_there:"Hey There",squeaky:"Squeaky",water_and_fire:"Water & Fire",fastest_freight:"Fastest Freight",penna_flyer:"Penna Flyer"},"Polar Express":{random:"Random",ready_to_roll:"Polar Express",hey_there:"All Aboard",squeaky:"You Coming?",water_and_fire:"Tickets",fastest_freight:"First Gift",penna_flyer:"The King"}},Q=Object.keys(S.Generic),N=[["master_volume","Master"],["engine_volume","Engine"],["horn_volume","Horn"],["bell_volume","Bell"],["speech_volume","Speech"]],G=150,Z=1500,U=250,o=(v,C="")=>`<svg class="mdi ${C}" viewBox="0 0 24 24" aria-hidden="true"><path d="${v}"/></svg>`,I=`
+:host { display:block; }
+ha-card, .card { overflow:hidden; }
+.card {
+  --l-surface: var(--secondary-background-color, #26262b);
+  --l-line: var(--divider-color, rgba(255,255,255,.12));
+  --l-text: var(--primary-text-color, #e8e8ec);
+  --l-muted: var(--secondary-text-color, #9a9aa6);
+  --l-accent: var(--primary-color, #03a9f4);
+  --l-stop: var(--error-color, #db4437);
+  --l-ok: var(--success-color, #43a047);
+  --l-warn: var(--warning-color, #ffa600);
+  --l-brass: #d4a24c;
+  padding:16px; color:var(--l-text); font-family:var(--paper-font-body1_-_font-family, inherit);
 }
+.mdi { width:20px; height:20px; fill:currentColor; flex:none; }
+.head { display:flex; align-items:center; gap:10px; min-width:0; }
+.head .mdi { color:var(--l-brass); width:24px; height:24px; }
+.head h2 { flex:1; margin:0; font-size:18px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pill { display:flex; align-items:center; gap:6px; font-size:12px; padding:4px 10px; border-radius:999px; white-space:nowrap;
+  background:color-mix(in srgb, var(--l-ok) 16%, transparent); color:var(--l-ok); }
+.pill i { width:7px; height:7px; border-radius:50%; background:currentColor; }
+.pill.warn { background:color-mix(in srgb, var(--l-warn) 16%, transparent); color:var(--l-warn); }
+.pill.warn i { animation:pulse 1.2s ease-in-out infinite; }
+.pill.off { background:var(--l-surface); color:var(--l-muted); }
+@keyframes pulse { 50% { opacity:.25; } }
 
-// Card Editor
-class LionelTrainCardEditor extends HTMLElement {
-  setConfig(config) {
-    this._config = config;
-    this._render();
-  }
+.hero { position:relative; margin-top:12px; height:var(--lionel-scene-height, 210px); border-radius:12px; overflow:hidden;
+  background:linear-gradient(#4f7fb8, #d6e6f2); }
+.hero.night { background:linear-gradient(#060b1e, #24365a); }
+.hero .scene { position:absolute; inset:0; }
+.hero::after { content:""; position:absolute; inset:auto 0 0 0; height:46%; pointer-events:none;
+  background:linear-gradient(transparent, rgba(8,14,24,.72)); }
+.ov { position:absolute; z-index:1; color:#fff; pointer-events:none; }
+.ov.speed { left:14px; bottom:8px; text-shadow:0 1px 8px rgba(0,0,0,.5); }
+.ov.speed b { font-size:46px; font-weight:300; font-variant-numeric:tabular-nums; }
+.ov.speed span { font-size:16px; margin-left:2px; }
+.ov.dir { right:10px; top:10px; font-size:12px; padding:4px 9px; border-radius:7px; background:rgba(0,0,0,.42); display:flex; gap:4px; align-items:center; }
+.ov.dir .mdi { width:14px; height:14px; }
+.ov.tags { right:10px; bottom:12px; font-size:11px; display:flex; gap:6px; }
+.ov.tags span { background:rgba(0,0,0,.38); padding:3px 8px; border-radius:6px; display:flex; gap:4px; align-items:center; }
+.ov.tags .mdi { width:13px; height:13px; }
+.speedrow { display:flex; align-items:baseline; gap:6px; margin:14px 0 2px; }
+.speedrow b { font-size:48px; font-weight:300; line-height:1; font-variant-numeric:tabular-nums; }
+.speedrow span { color:var(--l-muted); }
+.speedrow em { margin-left:auto; font-style:normal; font-size:13px; color:var(--l-muted); }
 
-  _render() {
-    this.innerHTML = `
-      <style>
-        .editor {
-          padding: 16px;
-        }
-        .editor label {
-          display: block;
-          margin-bottom: 4px;
-          font-weight: 500;
-        }
-        .editor input {
-          width: 100%;
-          padding: 8px;
-          border: 1px solid #ccc;
-          border-radius: 4px;
-          margin-bottom: 16px;
-          box-sizing: border-box;
-        }
-      </style>
-      <div class="editor">
-        <label>Throttle Entity (number.xxx_throttle)</label>
-        <input type="text" id="entity" value="${this._config.entity || ''}">
-        
-        <label>Card Name</label>
-        <input type="text" id="name" value="${this._config.name || ''}">
-      </div>
-    `;
+.throttle { position:relative; height:56px; margin-top:12px; border-radius:14px; background:var(--l-surface);
+  overflow:hidden; touch-action:none; cursor:pointer; user-select:none; outline:none; }
+.throttle:focus-visible { box-shadow:0 0 0 2px var(--l-accent); }
+.throttle .fill { position:absolute; inset:0 auto 0 0; width:0;
+  background:linear-gradient(90deg, color-mix(in srgb, var(--l-accent) 22%, transparent), color-mix(in srgb, var(--l-accent) 60%, transparent)); }
+.throttle .ticks { position:absolute; inset:0 10px; display:flex; justify-content:space-between; align-items:flex-end; pointer-events:none; }
+.throttle .ticks i { width:1px; height:8px; background:var(--l-line); }
+.throttle .ticks i:nth-child(8n+1) { height:14px; background:color-mix(in srgb, var(--l-text) 35%, transparent); }
+.throttle .knob { position:absolute; top:6px; bottom:6px; width:14px; margin-left:-7px; left:0; border-radius:7px;
+  background:#fff; box-shadow:0 1px 6px rgba(0,0,0,.45); }
+.throttle .label { position:absolute; left:28px; top:8px; font-size:11px; letter-spacing:.08em; color:var(--l-muted); pointer-events:none; }
 
-    this.querySelector('#entity').addEventListener('change', (e) => {
-      this._config = { ...this._config, entity: e.target.value };
-      this._fireEvent();
-    });
-
-    this.querySelector('#name').addEventListener('change', (e) => {
-      this._config = { ...this._config, name: e.target.value };
-      this._fireEvent();
-    });
-  }
-
-  _fireEvent() {
-    const event = new CustomEvent('config-changed', {
-      detail: { config: this._config },
-      bubbles: true,
-      composed: true
-    });
-    this.dispatchEvent(event);
-  }
-}
-
-// Register the card
-customElements.define('lionel-train-card', LionelTrainCard);
-customElements.define('lionel-train-card-editor', LionelTrainCardEditor);
-
-// Register with Home Assistant
-window.customCards = window.customCards || [];
-window.customCards.push({
-  type: 'lionel-train-card',
-  name: 'Lionel Train Controller',
-  description: 'A custom card for controlling Lionel LionChief trains',
-  preview: true
-});
-
-console.info('%c LIONEL-TRAIN-CARD %c Loaded ', 
-  'color: white; background: #f44336; font-weight: bold;',
-  'color: #f44336; background: white; font-weight: bold;'
-);
+.row { display:grid; grid-template-columns:1fr 84px; gap:10px; margin-top:10px; }
+.seg { display:flex; padding:4px; border-radius:12px; background:var(--l-surface); }
+.seg button { flex:1; border-radius:9px; color:var(--l-muted); justify-content:center; padding:10px 0; font-size:15px; }
+.seg button.on { background:var(--card-background-color, var(--ha-card-background, #1c1c1f)); color:var(--l-text);
+  box-shadow:inset 0 0 0 1px var(--l-line); }
+button { all:unset; box-sizing:border-box; display:flex; align-items:center; gap:6px; cursor:pointer;
+  -webkit-tap-highlight-color:transparent; transition:transform .08s, background .15s, opacity .15s; }
+button:active { transform:scale(.97); }
+button:focus-visible { outline:2px solid var(--l-accent); outline-offset:2px; }
+.stop { background:var(--l-stop); color:#fff; border-radius:12px; flex-direction:column; justify-content:center;
+  font-weight:700; letter-spacing:.06em; font-size:13px; gap:4px; }
+.stop i { width:16px; height:16px; border-radius:3px; background:#fff; }
+.acts { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:10px; }
+.act { flex-direction:column; justify-content:center; gap:2px; background:var(--l-surface); border-radius:12px; padding:11px 4px; font-size:14px; text-align:center; }
+.act small { font-size:11px; color:var(--l-muted); }
+.act.on { background:color-mix(in srgb, var(--l-warn) 18%, transparent); color:color-mix(in srgb, var(--l-warn) 72%, var(--l-text)); }
+.act.on small { color:inherit; opacity:.8; }
+.act.sounding { background:color-mix(in srgb, var(--l-accent) 22%, transparent); color:var(--l-accent); }
+.chips { display:flex; gap:8px; margin-top:12px; overflow-x:auto; scrollbar-width:none; padding-bottom:2px; }
+.chips::-webkit-scrollbar { display:none; }
+.chip { white-space:nowrap; border:1px solid var(--l-line); border-radius:999px; padding:7px 12px; font-size:13px; flex:none; }
+.chip .mdi { width:16px; height:16px; }
+.foot { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:12px; padding-top:10px;
+  border-top:1px solid var(--l-line); font-size:13px; color:var(--l-muted); }
+.foot button { padding:6px 4px; color:var(--l-muted); }
+.foot button .mdi { width:18px; height:18px; }
+.foot button.primary { color:var(--l-accent); }
+.settings { display:none; margin-top:10px; padding:12px; border-radius:12px; background:var(--l-surface); }
+.settings.open { display:grid; gap:10px; }
+.vol { display:grid; grid-template-columns:62px 1fr 18px; align-items:center; gap:10px; font-size:13px; color:var(--l-muted); }
+.vol input { width:100%; accent-color:var(--l-accent); }
+.vol output { text-align:right; color:var(--l-text); font-variant-numeric:tabular-nums; }
+.toggle { display:flex; justify-content:space-between; align-items:center; font-size:13px; color:var(--l-text); }
+.toggle input { accent-color:var(--l-accent); width:18px; height:18px; }
+.offline .needs-link { opacity:.4; pointer-events:none; }
+.offline .throttle .knob { background:var(--l-muted); }
+.missing { padding:16px; color:var(--l-muted); }
+`,u=class extends HTMLElement{constructor(){super(),this.attachShadow({mode:"open"}),this._throttleUntil=0,this._sendTimer=null,this._lastSent=0,this._pendingSpeed=null}static getConfigElement(){return document.createElement("lionel-train-card-editor")}static getStubConfig(C){return{device_id:Object.values(C?.devices||{}).find(M=>Object.values(C.entities||{}).some(L=>L.device_id===M.id&&L.platform==="lionel_controller"))?.id||"",show_3d:!0}}setConfig(C){if(!C)throw new Error("Invalid configuration");this._config={show_3d:C.animation!==!1,time_of_day:"auto",...C},C.show_3d!==void 0&&(this._config.show_3d=C.show_3d),this._built=!1,this._hass&&this._update()}set hass(C){this._hass=C,this._update()}getCardSize(){return this._config?.show_3d===!1?7:9}getGridOptions(){return{columns:12,min_columns:6,rows:"auto"}}connectedCallback(){this._built&&this._config.show_3d&&this._mountScene()}disconnectedCallback(){this._io?.disconnect(),document.removeEventListener("visibilitychange",this._onVis),this._scene?.dispose(),this._scene=null,clearTimeout(this._sendTimer)}_deviceId(){let C=this._config;if(C.device_id)return C.device_id;if(C.device){let H=String(C.device).toLowerCase();return Object.values(this._hass.devices||{}).find(L=>(L.name_by_user||L.name||"").toLowerCase()===H)?.id}}_resolveEntities(){let C=this._deviceId(),H={},M={};if(!C)return{map:H,announce:M};for(let L of Object.values(this._hass.entities||{})){if(L.device_id!==C)continue;let[r,A]=L.entity_id.split("."),i=A.match(/_announcement_(.+)$/);if(r==="button"&&i){M[i[1]]=L.entity_id;continue}let a=L.translation_key;a||(a=["throttle","master_volume","horn_volume","bell_volume","speech_volume","engine_volume","auto_reconnect","horn_sound","bell_ringing","lights","connect","disconnect","stop","forward","reverse","horn","bell","connection","status","train_model","direction","diagnostics"].find(e=>A.endsWith(`_${e}`))),a&&(H[`${r}.${a}`]=L.entity_id)}return{map:H,announce:M}}_st(C){let H=this._ents?.map[C];return H?this._hass.states[H]:void 0}_call(C,H,M,L={}){let r=this._ents.map[M];return r?this._hass.callService(C,H,{entity_id:r,...L}).catch(A=>{this.dispatchEvent(new CustomEvent("hass-notification",{bubbles:!0,composed:!0,detail:{message:A?.message||String(A)}}))}):Promise.resolve()}_update(){if(!(!this._config||!this._hass)){if(this._ents=this._resolveEntities(),!this._ents.map["number.throttle"]){this._built=!1,this.shadowRoot.innerHTML=`<style>${I}</style><ha-card><div class="missing">
+        Pick a Lionel train in the card settings.${this._deviceId()?" (No throttle found on that device.)":""}</div></ha-card>`;return}this._built||this._build(),this._refresh()}}_build(){let C=this._config,H=Array.from({length:32},()=>"<i></i>").join("");this.shadowRoot.innerHTML=`<style>${I}</style>
+<ha-card><div class="card">
+  <div class="head">${o(D)}<h2 id="name"></h2><span class="pill" id="pill"><i></i><span></span></span></div>
+  ${C.show_3d?`
+  <div class="hero" id="hero"><div class="scene" id="scene"></div>
+    <div class="ov speed"><b id="spd">0</b><span>%</span></div>
+    <div class="ov dir" id="dirtag"></div>
+    <div class="ov tags" id="tags"></div>
+  </div>`:`
+  <div class="speedrow"><b id="spd">0</b><span>%</span><em id="dirtag"></em></div>`}
+  <div class="throttle needs-link" id="throttle" role="slider" tabindex="0" aria-label="Throttle" aria-valuemin="0" aria-valuemax="100">
+    <div class="fill" id="fill"></div><div class="ticks">${H}</div><span class="label">THROTTLE</span><div class="knob" id="knob"></div>
+  </div>
+  <div class="row needs-link">
+    <div class="seg"><button id="rev">${o(x)}Reverse</button><button id="fwd">Forward${o(l)}</button></div>
+    <button class="stop" id="stop" aria-label="Stop"><i></i>STOP</button>
+  </div>
+  <div class="acts needs-link">
+    <button class="act" id="horn">${o(T)}<span>Horn</span><small>hold</small></button>
+    <button class="act" id="bell">${o(n)}<span>Bell</span><small>tap</small></button>
+    <button class="act" id="lights">${o(m)}<span>Lights</span><small></small></button>
+  </div>
+  <div class="chips needs-link" id="chips"></div>
+  <div class="settings" id="settings">
+    ${N.map(([M,L])=>`<label class="vol needs-link"><span>${L}</span>
+      <input type="range" min="0" max="7" step="1" data-vol="${M}"><output data-out="${M}"></output></label>`).join("")}
+    <label class="toggle"><span>Reconnect automatically</span><input type="checkbox" id="auto"></label>
+  </div>
+  <div class="foot">
+    <button id="link"></button>
+    <button id="gear">${o(F)}Settings</button>
+  </div>
+</div></ha-card>`,this._built=!0,this._wire(),C.show_3d&&this._mountScene()}_refresh(){let C=t=>this.shadowRoot.getElementById(t),H=this._st("binary_sensor.connection")?.state==="on",M=this._st("switch.auto_reconnect")?.state!=="off",L=this._hass.devices?.[this._deviceId()];C("name").textContent=this._config.name||L?.name_by_user||L?.name||"Lionel Train";let r=C("pill");if(r.className="pill"+(H?"":M?" warn":" off"),r.lastElementChild.textContent=H?"Connected":M?"Reconnecting\u2026":"Disconnected",this.shadowRoot.querySelector(".card").classList.toggle("offline",!H),!this._dragging&&Date.now()>this._throttleUntil){let t=Number(this._st("number.throttle")?.state);this._showSpeed(Number.isFinite(t)?t:0)}let A=this._st("sensor.direction")?.state!=="reverse";C("fwd").classList.toggle("on",A),C("rev").classList.toggle("on",!A),C("dirtag").innerHTML=`${o(A?l:x)}${A?"Forward":"Reverse"}`;let i=this._st("switch.lights")?.state==="on",a=C("lights");a.classList.toggle("on",i),a.querySelector("svg path").setAttribute("d",i?m:R),a.querySelector("small").textContent=i?"on":"off";let V=this._st("switch.bell_ringing")?.state==="on",e=C("bell");e.classList.toggle("sounding",V),e.querySelector("svg path").setAttribute("d",V?P:n),e.querySelector("small").textContent=this._ents.map["switch.bell_ringing"]&&V?"ringing":"tap",C("horn").classList.toggle("sounding",this._st("switch.horn_sound")?.state==="on");let s=S[this._st("sensor.train_model")?.state]||S.Generic,O=Q.filter(t=>this._ents.announce[t]),h=s.ready_to_roll+O.join();this._chipSig!==h&&(this._chipSig=h,C("chips").innerHTML=O.map(t=>`<button class="chip" data-ann="${t}">${t==="random"?o(y):""}${s[t]}</button>`).join(""));for(let[t]of N){let p=this._st(`number.${t}`),k=this.shadowRoot.querySelector(`[data-vol="${t}"]`);p&&k&&document.activeElement!==this&&this._activeVol!==t&&(k.value=p.state);let B=this.shadowRoot.querySelector(`[data-out="${t}"]`);B&&(B.textContent=p?p.state:"\u2013")}C("auto").checked=M;let g=C("link");g.innerHTML=H?`${o(b)}Disconnect`:`${o(w)}Connect`,g.classList.toggle("primary",!H);let d=this._isNight(),f=C("tags");f&&(f.innerHTML=`${i?`<span>${o(m)}Lights</span>`:""}<span>${o(d?E:W)}${d?"Night":"Day"}</span>`,C("hero").classList.toggle("night",d)),this._sceneState={speed:this._shownSpeed||0,forward:A,lights:i,night:d},this._scene?.setState(this._sceneState)}_isNight(){let C=this._config.time_of_day;return C==="day"?!1:C==="night"?!0:this._hass.states["sun.sun"]?.state==="below_horizon"}_showSpeed(C){C=Math.max(0,Math.min(100,Math.round(C))),this._shownSpeed=C;let H=M=>this.shadowRoot.getElementById(M);H("spd").textContent=C,H("fill").style.width=`${C}%`,H("knob").style.left=`calc(10px + (100% - 20px) * ${C/100})`,H("throttle").setAttribute("aria-valuenow",C),this._scene&&this._sceneState&&this._scene.setState({...this._sceneState,speed:C})}_wire(){let C=V=>this.shadowRoot.getElementById(V),H=C("throttle"),M=V=>{let e=H.getBoundingClientRect();return(V.clientX-e.left-10)/(e.width-20)*100};H.addEventListener("pointerdown",V=>{this._dragging=!0,H.setPointerCapture(V.pointerId),this._setSpeed(M(V))}),H.addEventListener("pointermove",V=>{this._dragging&&this._setSpeed(M(V))});let L=()=>{this._dragging&&(this._dragging=!1,this._flushSpeed())};H.addEventListener("pointerup",L),H.addEventListener("pointercancel",L),H.addEventListener("keydown",V=>{let e={ArrowRight:5,ArrowUp:5,ArrowLeft:-5,ArrowDown:-5,PageUp:20,PageDown:-20}[V.key];e===void 0&&V.key!=="Home"||(V.preventDefault(),this._setSpeed(V.key==="Home"?0:(this._shownSpeed||0)+e),this._flushSpeed())}),C("stop").addEventListener("click",()=>{clearTimeout(this._sendTimer),this._pendingSpeed=null,this._throttleUntil=Date.now()+Z,this._showSpeed(0),this._call("button","press","button.stop")}),C("fwd").addEventListener("click",()=>this._call("button","press","button.forward")),C("rev").addEventListener("click",()=>this._call("button","press","button.reverse")),C("lights").addEventListener("click",()=>this._call("switch","toggle","switch.lights")),C("bell").addEventListener("click",()=>{this._ents.map["switch.bell_ringing"]?this._call("switch","toggle","switch.bell_ringing"):this._call("button","press","button.bell")});let r=C("horn"),A=null,i=!1;r.addEventListener("pointerdown",V=>{r.setPointerCapture(V.pointerId),i=!1,A=setTimeout(()=>{this._ents.map["switch.horn_sound"]&&(i=!0,r.classList.add("sounding"),this._call("switch","turn_on","switch.horn_sound"))},U)});let a=()=>{clearTimeout(A),i?(i=!1,r.classList.remove("sounding"),this._call("switch","turn_off","switch.horn_sound")):A&&this._call("button","press","button.horn"),A=null};r.addEventListener("pointerup",a),r.addEventListener("pointercancel",a),r.addEventListener("contextmenu",V=>V.preventDefault()),C("chips").addEventListener("click",V=>{let e=V.target.closest("[data-ann]")?.dataset.ann;e&&this._hass.callService("button","press",{entity_id:this._ents.announce[e]})}),C("gear").addEventListener("click",()=>C("settings").classList.toggle("open")),C("link").addEventListener("click",()=>{let V=this._st("binary_sensor.connection")?.state==="on";this._call("button","press",V?"button.disconnect":"button.connect")}),C("auto").addEventListener("change",V=>this._call("switch",V.target.checked?"turn_on":"turn_off","switch.auto_reconnect")),this.shadowRoot.querySelectorAll("[data-vol]").forEach(V=>{let e=V.dataset.vol;V.addEventListener("input",()=>{this._activeVol=e,this.shadowRoot.querySelector(`[data-out="${e}"]`).textContent=V.value}),V.addEventListener("change",()=>{this._activeVol=null,this._call("number","set_value",`number.${e}`,{value:Number(V.value)})})})}_setSpeed(C){C=Math.max(0,Math.min(100,Math.round(C))),this._showSpeed(C),this._pendingSpeed=C,this._throttleUntil=Date.now()+Z;let H=G-(Date.now()-this._lastSent);H<=0?this._flushSpeed():this._sendTimer||(this._sendTimer=setTimeout(()=>this._flushSpeed(),H))}_flushSpeed(){if(clearTimeout(this._sendTimer),this._sendTimer=null,this._pendingSpeed===null)return;let C=this._pendingSpeed;this._pendingSpeed=null,!(C===this._lastValue&&Date.now()-this._lastSent<2e3)&&(this._lastSent=Date.now(),this._lastValue=C,this._throttleUntil=Date.now()+Z,this._call("number","set_value","number.throttle",{value:C}))}async _mountScene(){let C=this.shadowRoot.getElementById("scene");if(!(!C||this._scene||this._sceneLoading)){this._sceneLoading=!0;try{let H=new URL(`lionel-train-3d.js?v=${_}`,import.meta.url).href,{TrainScene:M}=await import(H);if(!this.isConnected||this._scene)return;this._scene=new M(C,{trainModel:this._st("sensor.train_model")?.state}),this._sceneState&&this._scene.setState({...this._sceneState,speed:this._shownSpeed||0}),this._io=new IntersectionObserver(L=>{this._onScreen=L.some(r=>r.isIntersecting),this._scene?.setVisible(this._onScreen&&document.visibilityState==="visible")}),this._io.observe(C),this._onVis=()=>this._scene?.setVisible(this._onScreen!==!1&&document.visibilityState==="visible"),document.addEventListener("visibilitychange",this._onVis)}catch(H){console.warn("Lionel Train Card: 3D view unavailable",H),C.parentElement.style.display="none"}finally{this._sceneLoading=!1}}}},c=class extends HTMLElement{setConfig(C){this._config=C,this._render()}set hass(C){this._hass=C,this._render()}_render(){!this._hass||!this._config||(this._form||(this._form=document.createElement("ha-form"),this._form.computeLabel=C=>({device_id:"Train",name:"Name (optional)",show_3d:"Show 3D layout",time_of_day:"Scene lighting"})[C.name]||C.name,this._form.addEventListener("value-changed",C=>{this.dispatchEvent(new CustomEvent("config-changed",{detail:{config:C.detail.value}}))}),this.appendChild(this._form)),this._form.hass=this._hass,this._form.data={show_3d:!0,time_of_day:"auto",...this._config},this._form.schema=[{name:"device_id",required:!0,selector:{device:{integration:"lionel_controller"}}},{name:"name",selector:{text:{}}},{name:"show_3d",selector:{boolean:{}}},{name:"time_of_day",selector:{select:{mode:"dropdown",options:[{value:"auto",label:"Follow the sun"},{value:"day",label:"Always day"},{value:"night",label:"Always night"}]}}}])}};customElements.define("lionel-train-card",u);customElements.define("lionel-train-card-editor",c);window.customCards=window.customCards||[];window.customCards.push({type:"lionel-train-card",name:"Lionel Train Card",description:"Drive a Lionel LionChief locomotive, with a 3D layout view.",preview:!0,documentationURL:"https://github.com/BlackandBlue1908/ha_lionel_card"});console.info(`%c LIONEL-TRAIN-CARD %c ${_} `,"color:#fff;background:#7b2d26;font-weight:600","color:#7b2d26;background:#fff");

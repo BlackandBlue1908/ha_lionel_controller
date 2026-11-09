@@ -8,13 +8,22 @@
           "device": "Lionel Train"
         }
       },
+      "train_model": {
+        "title": "Select Train Model",
+        "description": "Select your train model for **{name}**. This determines the announcement button labels. Choose 'Generic' if your train is not listed.",
+        "data": {
+          "train_model": "Train Model"
+        }
+      },
       "manual": {
         "title": "Manual Configuration",
         "description": "Enter your Lionel LionChief locomotive details manually.",
         "data": {
           "mac_address": "Bluetooth MAC address",
-          "name": "Name",
-          "service_uuid": "Service UUID"
+          "name": "Name"
+        },
+        "data_description": {
+          "mac_address": "Looks like 44:A6:E5:45:50:31. The train must be powered on and in range of a Bluetooth adapter or proxy."
         }
       },
       "bluetooth_confirm": {
@@ -23,14 +32,228 @@
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to the train. Make sure it's powered on and in range.",
+      "cannot_connect": "Home Assistant can't see that train. Power it on and make sure a Bluetooth adapter or proxy is within range.",
       "invalid_mac": "Invalid MAC address format",
       "unknown": "Unexpected error occurred",
       "no_devices_found": "No Lionel trains found. Make sure your train is powered on, then select 'Enter MAC address manually' or try again."
     },
     "abort": {
       "already_configured": "Device is already configured",
-      "not_lionel_device": "This device is not a Lionel LionChief locomotive"
+      "not_lionel_device": "This device is not a Lionel LionChief locomotive",
+      "no_devices_found": "No Lionel trains found."
+    },
+    "flow_title": "{name}"
+  },
+  "entity": {
+    "number": {
+      "throttle": {
+        "name": "Throttle"
+      },
+      "master_volume": {
+        "name": "Master Volume"
+      },
+      "horn_volume": {
+        "name": "Horn Volume"
+      },
+      "bell_volume": {
+        "name": "Bell Volume"
+      },
+      "speech_volume": {
+        "name": "Speech Volume"
+      },
+      "engine_volume": {
+        "name": "Engine Volume"
+      }
+    },
+    "switch": {
+      "lights": {
+        "name": "Lights"
+      },
+      "auto_reconnect": {
+        "name": "Auto Reconnect"
+      }
+    },
+    "button": {
+      "connect": {
+        "name": "Connect"
+      },
+      "disconnect": {
+        "name": "Disconnect"
+      },
+      "stop": {
+        "name": "Stop"
+      },
+      "forward": {
+        "name": "Forward"
+      },
+      "reverse": {
+        "name": "Reverse"
+      },
+      "horn": {
+        "name": "Horn"
+      },
+      "bell": {
+        "name": "Bell"
+      },
+      "announcement": {
+        "name": "Announcement {announcement}"
+      }
+    },
+    "binary_sensor": {
+      "connection": {
+        "name": "Connection"
+      }
+    },
+    "sensor": {
+      "status": {
+        "name": "Status"
+      },
+      "train_model": {
+        "name": "Train Model"
+      },
+      "direction": {
+        "name": "Direction",
+        "state": {
+          "forward": "Forward",
+          "reverse": "Reverse"
+        }
+      },
+      "diagnostics": {
+        "name": "Diagnostics",
+        "state": {
+          "ok": "OK",
+          "disconnected": "Disconnected",
+          "error": "Error"
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "not_connected": {
+      "message": "Can't reach {name}: {error}"
+    },
+    "command_failed": {
+      "message": "{name} didn't accept the command: {error}"
+    },
+    "no_trains": {
+      "message": "No Lionel trains are loaded."
+    },
+    "unknown_train": {
+      "message": "Device {device_id} is not a loaded Lionel train."
+    }
+  },
+  "services": {
+    "set_speed": {
+      "name": "Set speed",
+      "description": "Set the train speed.",
+      "fields": {
+        "speed": {
+          "name": "Speed",
+          "description": "Speed in percent (0-100)."
+        },
+        "device_id": {
+          "name": "Train",
+          "description": "Which train. Leave empty to send to every loaded train."
+        }
+      }
+    },
+    "set_direction": {
+      "name": "Set direction",
+      "description": "Set the direction of travel.",
+      "fields": {
+        "direction": {
+          "name": "Direction",
+          "description": "Forward or reverse."
+        },
+        "device_id": {
+          "name": "Train",
+          "description": "Which train. Leave empty to send to every loaded train."
+        }
+      }
+    },
+    "stop": {
+      "name": "Stop",
+      "description": "Stop the train.",
+      "fields": {
+        "device_id": {
+          "name": "Train",
+          "description": "Which train. Leave empty to send to every loaded train."
+        }
+      }
+    },
+    "horn": {
+      "name": "Horn",
+      "description": "Sound the horn briefly.",
+      "fields": {
+        "device_id": {
+          "name": "Train",
+          "description": "Which train. Leave empty to send to every loaded train."
+        }
+      }
+    },
+    "bell": {
+      "name": "Bell",
+      "description": "Ring the bell briefly.",
+      "fields": {
+        "device_id": {
+          "name": "Train",
+          "description": "Which train. Leave empty to send to every loaded train."
+        }
+      }
+    },
+    "lights_on": {
+      "name": "Lights on",
+      "description": "Turn the train lights on.",
+      "fields": {
+        "device_id": {
+          "name": "Train",
+          "description": "Which train. Leave empty to send to every loaded train."
+        }
+      }
+    },
+    "lights_off": {
+      "name": "Lights off",
+      "description": "Turn the train lights off.",
+      "fields": {
+        "device_id": {
+          "name": "Train",
+          "description": "Which train. Leave empty to send to every loaded train."
+        }
+      }
+    },
+    "play_announcement": {
+      "name": "Play announcement",
+      "description": "Play a recorded announcement.",
+      "fields": {
+        "announcement": {
+          "name": "Announcement code",
+          "description": "0 = random, 1-6 = the locomotive's announcements."
+        },
+        "device_id": {
+          "name": "Train",
+          "description": "Which train. Leave empty to send to every loaded train."
+        }
+      }
+    },
+    "connect": {
+      "name": "Connect",
+      "description": "Connect to the train and turn automatic reconnection back on.",
+      "fields": {
+        "device_id": {
+          "name": "Train",
+          "description": "Which train. Leave empty to send to every loaded train."
+        }
+      }
+    },
+    "disconnect": {
+      "name": "Disconnect",
+      "description": "Release the train until Connect is used.",
+      "fields": {
+        "device_id": {
+          "name": "Train",
+          "description": "Which train. Leave empty to send to every loaded train."
+        }
+      }
     }
   }
 }

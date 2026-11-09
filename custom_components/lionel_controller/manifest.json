@@ -1,24 +1,28 @@
 {
   "domain": "lionel_controller",
   "name": "Lionel Train Controller",
-  "version": "1.1.0",
-  "documentation": "https://github.com/BlackandBlue1908/ha_lionel_controller",
-  "issue_tracker": "https://github.com/BlackandBlue1908/ha_lionel_controller/issues",
-  "dependencies": ["bluetooth"],
-  "config_flow": true,
-  "codeowners": ["@BlackandBlue1908"],
-  "requirements": ["bleak>=0.20.0", "bleak-retry-connector>=3.4.0"],
   "bluetooth": [
     {
       "service_uuid": "e20a39f4-73f5-4bc4-a12f-17d1ad07a961",
       "connectable": true
-    },
-    {
-      "service_uuid": "0000180a-0000-1000-8000-00805f9b34fb",
-      "connectable": false
     }
   ],
-  "bluetooth_discovery": true,
+  "codeowners": [
+    "@BlackandBlue1908"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "bluetooth_adapters",
+    "http"
+  ],
+  "documentation": "https://github.com/BlackandBlue1908/ha_lionel_controller",
+  "integration_type": "device",
   "iot_class": "local_push",
-  "quality_scale": "silver"
+  "issue_tracker": "https://github.com/BlackandBlue1908/ha_lionel_controller/issues",
+  "loggers": [
+    "bleak",
+    "bleak_retry_connector"
+  ],
+  "requirements": [],
+  "version": "2.0.0"
 }

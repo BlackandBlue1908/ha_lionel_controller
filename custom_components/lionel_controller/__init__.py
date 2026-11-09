@@ -1,1069 +1,119 @@
 """The Lionel Train Controller integration."""
 from __future__ import annotations
 
-import asyncio
-import logging
-from typing import Any
+from collections.abc import Awaitable, Callable
+from pathlib import Path
 
-from bleak import BleakClient, BleakError
-from bleak_retry_connector import establish_connection, BleakClientWithServiceCache
-from homeassistant.components import bluetooth
-from homeassistant.components.bluetooth import BluetoothServiceInfoBleak, BluetoothChange
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_NAME, Platform
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryNotReady
+import voluptuous as vol
 
-from .const import (
-    CMD_MASTER_VOLUME,
-    CMD_SMOKE,
-    CMD_SOUND_VOLUME,
-    CONF_MAC_ADDRESS,
-    CONF_SERVICE_UUID,
-    DEFAULT_RETRY_COUNT,
-    DEFAULT_TIMEOUT,
-    DEVICE_INFO_SERVICE_UUID,
-    DOMAIN,
-    FIRMWARE_REVISION_CHAR_UUID,
-    HARDWARE_REVISION_CHAR_UUID,
-    LIONCHIEF_SERVICE_UUID,
-    MANUFACTURER_NAME_CHAR_UUID,
-    MODEL_NUMBER_CHAR_UUID,
-    NOTIFY_CHARACTERISTIC_UUID,
-    SERIAL_NUMBER_CHAR_UUID,
-    SOFTWARE_REVISION_CHAR_UUID,
-    SOUND_SOURCE_BELL,
-    SOUND_SOURCE_ENGINE,
-    SOUND_SOURCE_HORN,
-    SOUND_SOURCE_SPEECH,
-    WRITE_CHARACTERISTIC_UUID,
-    build_command,
-    build_simple_command,
-)
+from homeassistant.components.http import StaticPathConfig
+from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import ATTR_DEVICE_ID, Platform
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import config_validation as cv, device_registry as dr
+from homeassistant.helpers.typing import ConfigType
 
-_LOGGER = logging.getLogger(__name__)
+from .const import DOMAIN
+from .coordinator import LionelConfigEntry, LionelTrainCoordinator
 
-PLATFORMS: list[Platform] = [Platform.NUMBER, Platform.SWITCH, Platform.BUTTON, Platform.BINARY_SENSOR, Platform.SENSOR]
+PLATFORMS: list[Platform] = [
+    Platform.BINARY_SENSOR,
+    Platform.BUTTON,
+    Platform.NUMBER,
+    Platform.SENSOR,
+    Platform.SWITCH,
+]
 
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
-@callback
-def _async_discovered_device(
-    service_info: BluetoothServiceInfoBleak, change: BluetoothChange
-) -> bool:
-    """Check if discovered device is a Lionel LionChief locomotive."""
-    if change != BluetoothChange.ADVERTISEMENT:
-        return False
-    
-    # Check for Lionel LionChief service UUID
-    lionel_service_uuid = LIONCHIEF_SERVICE_UUID.lower()
-    return any(
-        service_uuid.lower() == lionel_service_uuid
-        for service_uuid in service_info.service_uuids
-    )
+CARD_URL = "/lionel_controller"
+
+_TARGET = {vol.Optional(ATTR_DEVICE_ID): vol.All(cv.ensure_list, [cv.string])}
+
+SERVICES: dict[str, tuple[vol.Schema, Callable[[LionelTrainCoordinator, ServiceCall], Awaitable[None]]]] = {
+    "set_speed": (
+        vol.Schema({**_TARGET, vol.Required("speed"): vol.All(vol.Coerce(int), vol.Range(min=0, max=100))}),
+        lambda c, call: c.async_set_speed(call.data["speed"]),
+    ),
+    "set_direction": (
+        vol.Schema({**_TARGET, vol.Required("direction"): vol.In(["forward", "reverse"])}),
+        lambda c, call: c.async_set_direction(call.data["direction"] == "forward"),
+    ),
+    "stop": (vol.Schema(_TARGET), lambda c, call: c.async_set_speed(0)),
+    "horn": (vol.Schema(_TARGET), lambda c, call: c.async_horn_blast()),
+    "bell": (vol.Schema(_TARGET), lambda c, call: c.async_ring_bell()),
+    "lights_on": (vol.Schema(_TARGET), lambda c, call: c.async_set_lights(True)),
+    "lights_off": (vol.Schema(_TARGET), lambda c, call: c.async_set_lights(False)),
+    "play_announcement": (
+        vol.Schema({**_TARGET, vol.Required("announcement"): vol.All(vol.Coerce(int), vol.Range(min=0, max=255))}),
+        lambda c, call: c.async_play_announcement(call.data["announcement"]),
+    ),
+    "connect": (vol.Schema(_TARGET), lambda c, call: c.async_connect()),
+    "disconnect": (vol.Schema(_TARGET), lambda c, call: c.async_disconnect()),
+}
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up Lionel Train Controller from a config entry."""
-    mac_address = entry.data[CONF_MAC_ADDRESS]
-    name = entry.data[CONF_NAME]
-    service_uuid = entry.data[CONF_SERVICE_UUID]
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register the actions and the card's static path once."""
 
-    coordinator = LionelTrainCoordinator(hass, mac_address, name, service_uuid)
-    
-    # Don't require initial connection - allow integration to load even if locomotive is off
-    try:
-        await coordinator.async_setup()
-        _LOGGER.info("Successfully connected to Lionel train at %s", mac_address)
-    except (BleakError, asyncio.TimeoutError) as err:
-        _LOGGER.warning("Could not connect to Lionel train at %s during setup: %s", mac_address, err)
-        _LOGGER.info("Integration will load anyway - train will connect when powered on")
-        # Don't raise ConfigEntryNotReady - let the integration load anyway
+    def _targets(call: ServiceCall) -> list[LionelTrainCoordinator]:
+        loaded = {
+            entry.entry_id: entry.runtime_data
+            for entry in hass.config_entries.async_entries(DOMAIN)
+            if entry.state is ConfigEntryState.LOADED
+        }
+        if not (device_ids := call.data.get(ATTR_DEVICE_ID)):
+            if not loaded:
+                raise ServiceValidationError(translation_domain=DOMAIN, translation_key="no_trains")
+            return list(loaded.values())
+        device_registry = dr.async_get(hass)
+        targets: list[LionelTrainCoordinator] = []
+        for device_id in device_ids:
+            device = device_registry.async_get(device_id)
+            matches = [loaded[eid] for eid in (device.config_entries if device else ()) if eid in loaded]
+            if not matches:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="unknown_train",
+                    translation_placeholders={"device_id": device_id},
+                )
+            targets.extend(matches)
+        return targets
 
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = coordinator
+    def _make_handler(
+        action: Callable[[LionelTrainCoordinator, ServiceCall], Awaitable[None]],
+    ) -> Callable[[ServiceCall], Awaitable[None]]:
+        async def handle(call: ServiceCall) -> None:
+            for coordinator in _targets(call):
+                await action(coordinator, call)
 
-    # Register services
-    await _async_register_services(hass, coordinator)
+        return handle
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    
-    # Register the custom Lovelace card
-    await _async_register_card(hass)
-    
+    for name, (schema, action) in SERVICES.items():
+        hass.services.async_register(DOMAIN, name, _make_handler(action), schema=schema)
+
+    if hass.http is not None:
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(CARD_URL, str(Path(__file__).parent / "www"), False)]
+        )
     return True
 
 
-async def _async_register_services(hass: HomeAssistant, coordinator: "LionelTrainCoordinator") -> None:
-    """Register Home Assistant services for train control."""
-    import voluptuous as vol
-    from homeassistant.helpers import config_validation as cv
+async def async_setup_entry(hass: HomeAssistant, entry: LionelConfigEntry) -> bool:
+    """Set up one locomotive.
 
-    # Service schemas
-    SPEED_SCHEMA = vol.Schema({
-        vol.Required("speed"): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
-    })
-
-    DIRECTION_SCHEMA = vol.Schema({
-        vol.Required("direction"): vol.In(["forward", "reverse"]),
-    })
-
-    ANNOUNCEMENT_SCHEMA = vol.Schema({
-        vol.Required("announcement"): vol.Coerce(int),
-    })
-
-    async def set_speed_service(call):
-        """Service to set train speed."""
-        speed = call.data["speed"]
-        _LOGGER.info("Setting train speed to %d via service", speed)
-        await coordinator.async_set_speed(speed)
-
-    async def set_direction_service(call):
-        """Service to set train direction."""
-        direction = call.data["direction"]
-        forward = direction == "forward"
-        _LOGGER.info("Setting train direction to %s via service", direction)
-        await coordinator.async_set_direction(forward)
-
-    async def stop_service(call):
-        """Service to stop the train."""
-        _LOGGER.info("Stopping train via service")
-        await coordinator.async_set_speed(0)
-
-    async def horn_service(call):
-        """Service to sound the horn."""
-        _LOGGER.info("Sounding horn via service")
-        await coordinator.async_set_horn(True)
-        await asyncio.sleep(0.5)
-        await coordinator.async_set_horn(False)
-
-    async def bell_service(call):
-        """Service to ring the bell."""
-        _LOGGER.info("Ringing bell via service")
-        await coordinator.async_set_bell(True)
-        await asyncio.sleep(0.5)
-        await coordinator.async_set_bell(False)
-
-    async def lights_on_service(call):
-        """Service to turn lights on."""
-        _LOGGER.info("Turning lights on via service")
-        await coordinator.async_set_lights(True)
-
-    async def lights_off_service(call):
-        """Service to turn lights off."""
-        _LOGGER.info("Turning lights off via service")
-        await coordinator.async_set_lights(False)
-
-    async def play_announcement_service(call):
-        """Service to play an announcement."""
-        announcement = call.data["announcement"]
-        _LOGGER.info("Playing announcement %d via service", announcement)
-        await coordinator.async_play_announcement(announcement)
-
-    async def connect_service(call):
-        """Service to connect to the train."""
-        _LOGGER.info("Connecting to train via service")
-        await coordinator.async_force_reconnect()
-
-    async def disconnect_service(call):
-        """Service to disconnect from the train."""
-        _LOGGER.info("Disconnecting from train via service")
-        await coordinator.async_disconnect()
-
-    # Register services if not already registered
-    if not hass.services.has_service(DOMAIN, "set_speed"):
-        hass.services.async_register(DOMAIN, "set_speed", set_speed_service, schema=SPEED_SCHEMA)
-    if not hass.services.has_service(DOMAIN, "set_direction"):
-        hass.services.async_register(DOMAIN, "set_direction", set_direction_service, schema=DIRECTION_SCHEMA)
-    if not hass.services.has_service(DOMAIN, "stop"):
-        hass.services.async_register(DOMAIN, "stop", stop_service)
-    if not hass.services.has_service(DOMAIN, "horn"):
-        hass.services.async_register(DOMAIN, "horn", horn_service)
-    if not hass.services.has_service(DOMAIN, "bell"):
-        hass.services.async_register(DOMAIN, "bell", bell_service)
-    if not hass.services.has_service(DOMAIN, "lights_on"):
-        hass.services.async_register(DOMAIN, "lights_on", lights_on_service)
-    if not hass.services.has_service(DOMAIN, "lights_off"):
-        hass.services.async_register(DOMAIN, "lights_off", lights_off_service)
-    if not hass.services.has_service(DOMAIN, "play_announcement"):
-        hass.services.async_register(DOMAIN, "play_announcement", play_announcement_service, schema=ANNOUNCEMENT_SCHEMA)
-    if not hass.services.has_service(DOMAIN, "connect"):
-        hass.services.async_register(DOMAIN, "connect", connect_service)
-    if not hass.services.has_service(DOMAIN, "disconnect"):
-        hass.services.async_register(DOMAIN, "disconnect", disconnect_service)
-
-    _LOGGER.info("Registered Lionel Train services")
+    Loads even while the train is off; it connects when it starts advertising.
+    """
+    coordinator = LionelTrainCoordinator(hass, entry)
+    entry.runtime_data = coordinator
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    coordinator.async_start()
+    return True
 
 
-async def _async_register_card(hass: HomeAssistant) -> None:
-    """Register the custom Lovelace card."""
-    import os
-    card_path = os.path.join(os.path.dirname(__file__), "www")
-    
-    # Use the older API that's compatible with more HA versions
-    try:
-        hass.http.register_static_path(
-            "/lionel_controller", card_path, cache_headers=False
-        )
-        _LOGGER.info("Lionel Train card available at /lionel_controller/lionel-train-card.js")
-    except Exception as err:
-        _LOGGER.debug("Static path may already be registered: %s", err)
-
-
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: LionelConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        coordinator = hass.data[DOMAIN].pop(entry.entry_id)
-        await coordinator.async_shutdown()
-
+        await entry.runtime_data.async_shutdown()
     return unload_ok
-
-
-class LionelTrainCoordinator:
-    """Coordinator for managing the Lionel train connection."""
-
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        mac_address: str,
-        name: str,
-        service_uuid: str,
-    ) -> None:
-        """Initialize the coordinator."""
-        self.hass = hass
-        self.mac_address = mac_address
-        self.name = name
-        self.service_uuid = service_uuid
-        self._client: BleakClientWithServiceCache | None = None
-        self._connected = False
-        self._lock = asyncio.Lock()
-        self._retry_count = 0
-        self._update_callbacks = set()
-        
-        # State tracking
-        self._speed = 0
-        self._direction_forward = True
-        self._lights_on = True  # Default to on since locomotive lights are on when reconnected
-        self._horn_on = False
-        self._bell_on = False
-        
-        # Advanced feature state tracking
-        self._master_volume = 5  # Default mid-range volume
-        self._horn_volume = 5
-        self._bell_volume = 5
-        self._speech_volume = 5
-        self._engine_volume = 5
-        self._horn_pitch = 0
-        self._bell_pitch = 0
-        self._speech_pitch = 0
-        self._engine_pitch = 0
-        
-        self._smoke_on = False
-        
-        # Device information
-        self._model_number = None
-        self._serial_number = None
-        self._firmware_revision = None
-        self._hardware_revision = None
-        self._software_revision = None
-        self._manufacturer_name = None
-        
-        # Dynamic characteristic discovery
-        self._discovered_write_char = None
-        self._discovered_notify_char = None
-        self._discovered_lionchief_service = None
-        
-        # Status information
-        self._last_notification_hex = None
-        
-        # Error tracking for diagnostics
-        self._last_error = None
-        self._last_error_time = None
-        self._connection_attempts = 0
-        self._successful_commands = 0
-        self._failed_commands = 0
-        
-        # Reconnection task
-        self._reconnect_task: asyncio.Task | None = None
-        self._reconnect_interval = 30  # seconds between reconnection attempts
-        self._auto_reconnect_enabled = True  # User-controllable auto-reconnect setting
-
-    @property
-    def connected(self) -> bool:
-        """Return True if connected to the train."""
-        # Use our internal flag as the primary source of truth
-        # The _client.is_connected can lag behind our state
-        return self._connected
-
-    @property
-    def speed(self) -> int:
-        """Return current speed (0-100)."""
-        return self._speed
-
-    @property
-    def direction_forward(self) -> bool:
-        """Return True if direction is forward."""
-        return self._direction_forward
-
-    @property
-    def lights_on(self) -> bool:
-        """Return True if lights are on."""
-        return self._lights_on
-
-    @property
-    def horn_on(self) -> bool:
-        """Return True if horn is on."""
-        return self._horn_on
-
-    @property
-    def bell_on(self) -> bool:
-        """Return True if bell is on."""
-        return self._bell_on
-
-    # Advanced feature properties
-    @property
-    def master_volume(self) -> int:
-        """Return master volume (0-7)."""
-        return self._master_volume
-
-    @property
-    def horn_volume(self) -> int:
-        """Return horn volume (0-7)."""
-        return self._horn_volume
-
-    @property
-    def bell_volume(self) -> int:
-        """Return bell volume (0-7)."""
-        return self._bell_volume
-
-    @property
-    def speech_volume(self) -> int:
-        """Return speech volume (0-7)."""
-        return self._speech_volume
-
-    @property
-    def engine_volume(self) -> int:
-        """Return engine volume (0-7)."""
-        return self._engine_volume
-
-    @property
-    def smoke_on(self) -> bool:
-        """Return True if smoke unit is on."""
-        return self._smoke_on
-
-    @property
-    def last_notification_hex(self) -> str | None:
-        """Return the last notification hex string."""
-        return self._last_notification_hex
-
-    @property
-    def auto_reconnect_enabled(self) -> bool:
-        """Return True if auto-reconnect is enabled."""
-        return self._auto_reconnect_enabled
-
-    @property
-    def last_error(self) -> str | None:
-        """Return the last error message."""
-        return self._last_error
-
-    @property
-    def last_error_time(self) -> str | None:
-        """Return the time of the last error."""
-        return self._last_error_time
-
-    @property
-    def connection_attempts(self) -> int:
-        """Return the number of connection attempts."""
-        return self._connection_attempts
-
-    @property
-    def successful_commands(self) -> int:
-        """Return the number of successful commands."""
-        return self._successful_commands
-
-    @property
-    def failed_commands(self) -> int:
-        """Return the number of failed commands."""
-        return self._failed_commands
-
-    def _record_error(self, error: str) -> None:
-        """Record an error for diagnostics."""
-        from datetime import datetime
-        self._last_error = error
-        self._last_error_time = datetime.now().isoformat()
-        _LOGGER.debug("Recorded error: %s", error)
-
-    def set_auto_reconnect(self, enabled: bool) -> None:
-        """Enable or disable auto-reconnect."""
-        self._auto_reconnect_enabled = enabled
-        _LOGGER.info("Auto-reconnect %s", "enabled" if enabled else "disabled")
-        
-        if not enabled:
-            # If disabling, cancel any pending reconnection task
-            if self._reconnect_task and not self._reconnect_task.done():
-                self._reconnect_task.cancel()
-                _LOGGER.debug("Cancelled pending reconnection task")
-            # Also cancel availability monitor
-            if hasattr(self, '_monitor_task') and self._monitor_task and not self._monitor_task.done():
-                self._monitor_task.cancel()
-                _LOGGER.debug("Cancelled availability monitor")
-        else:
-            # If enabling and not connected, start availability monitor
-            if not self.connected:
-                self._start_availability_monitor()
-
-    @property
-    def device_info(self) -> dict:
-        """Return device information."""
-        return {
-            "model": self._model_number or "LionChief Locomotive",
-            "manufacturer": self._manufacturer_name or "Lionel",
-            "sw_version": self._software_revision or "Unknown",
-            "hw_version": self._hardware_revision or "Unknown", 
-            "serial_number": self._serial_number,
-        }
-
-    def add_update_callback(self, callback):
-        """Add a callback to be called when the state changes."""
-        self._update_callbacks.add(callback)
-
-    def remove_update_callback(self, callback):
-        """Remove a callback."""
-        self._update_callbacks.discard(callback)
-
-    def _notify_state_change(self):
-        """Notify all registered callbacks of state changes."""
-        for callback in self._update_callbacks:
-            try:
-                callback()
-            except Exception as err:
-                _LOGGER.error("Error calling update callback: %s", err)
-
-    async def async_setup(self) -> None:
-        """Set up the coordinator."""
-        try:
-            await self._async_connect()
-        except (BleakError, asyncio.TimeoutError) as err:
-            _LOGGER.debug("Initial connection failed during setup: %s", err)
-            # Don't raise - let the integration load anyway
-            # Start background monitoring to connect when train becomes available
-            if self._auto_reconnect_enabled:
-                self._start_availability_monitor()
-
-    async def async_shutdown(self) -> None:
-        """Shut down the coordinator."""
-        # Cancel any pending reconnection task
-        if self._reconnect_task and not self._reconnect_task.done():
-            self._reconnect_task.cancel()
-            try:
-                await self._reconnect_task
-            except asyncio.CancelledError:
-                pass
-        
-        # Cancel availability monitor task
-        if hasattr(self, '_monitor_task') and self._monitor_task and not self._monitor_task.done():
-            self._monitor_task.cancel()
-            try:
-                await self._monitor_task
-            except asyncio.CancelledError:
-                pass
-        
-        if self._client and self._client.is_connected:
-            await self._client.disconnect()
-        self._connected = False
-
-    def _start_availability_monitor(self) -> None:
-        """Start background task to monitor for train availability."""
-        if not hasattr(self, '_monitor_task') or self._monitor_task is None or self._monitor_task.done():
-            self._monitor_task = self.hass.async_create_task(
-                self._async_availability_monitor()
-            )
-            _LOGGER.info("Started availability monitor for %s", self.mac_address)
-
-    async def _async_availability_monitor(self) -> None:
-        """Periodically check if train is available and connect when found."""
-        _LOGGER.info("Monitoring for train availability at %s", self.mac_address)
-        
-        check_interval = 10  # Check every 10 seconds
-        
-        while True:
-            # Stop if auto-reconnect is disabled
-            if not self._auto_reconnect_enabled:
-                _LOGGER.debug("Auto-reconnect disabled, stopping availability monitor")
-                return
-            
-            # Stop if already connected
-            if self.connected:
-                _LOGGER.debug("Train connected, stopping availability monitor")
-                return
-            
-            await asyncio.sleep(check_interval)
-            
-            # Check again after sleep
-            if not self._auto_reconnect_enabled or self.connected:
-                return
-            
-            # Check if device is available in HA's Bluetooth cache
-            ble_device = bluetooth.async_ble_device_from_address(
-                self.hass, self.mac_address, connectable=True
-            )
-            
-            if ble_device:
-                _LOGGER.info("Train detected at %s, attempting connection", self.mac_address)
-                try:
-                    await self._async_connect()
-                    if self.connected:
-                        _LOGGER.info("Successfully connected to train via availability monitor")
-                        return
-                except (BleakError, asyncio.TimeoutError) as err:
-                    _LOGGER.debug("Connection attempt failed: %s", err)
-            else:
-                _LOGGER.debug("Train not yet available at %s", self.mac_address)
-
-    def _on_disconnected(self, client: BleakClient) -> None:
-        """Handle disconnection from the train."""
-        _LOGGER.warning("Disconnected from Lionel train at %s", self.mac_address)
-        self._connected = False
-        self._notify_state_change()
-        
-        # Schedule automatic reconnection if enabled
-        if self._auto_reconnect_enabled:
-            if self._reconnect_task is None or self._reconnect_task.done():
-                self._reconnect_task = self.hass.async_create_task(
-                    self._async_reconnect_loop()
-                )
-        else:
-            _LOGGER.debug("Auto-reconnect is disabled, not attempting reconnection")
-
-    async def _async_reconnect_loop(self) -> None:
-        """Attempt to reconnect to the train periodically."""
-        _LOGGER.info("Starting automatic reconnection attempts for %s", self.mac_address)
-        
-        attempt = 0
-        max_attempts = 10  # Try up to 10 times before giving up
-        
-        while attempt < max_attempts:
-            # Check if auto-reconnect was disabled
-            if not self._auto_reconnect_enabled:
-                _LOGGER.info("Auto-reconnect disabled, stopping reconnection attempts")
-                return
-            
-            attempt += 1
-            
-            # Wait before attempting reconnection (shorter initial wait, then backoff)
-            if attempt == 1:
-                wait_time = 5  # First attempt after 5 seconds
-            else:
-                wait_time = min(10 * attempt, 60)  # Then 20s, 30s, 40s... up to 60s max
-            
-            _LOGGER.debug("Waiting %.1f seconds before reconnection attempt %d/%d", 
-                         wait_time, attempt, max_attempts)
-            await asyncio.sleep(wait_time)
-            
-            # Check if already connected (might have reconnected via other means)
-            if self.connected:
-                _LOGGER.info("Already reconnected to train")
-                return
-            
-            # Check again if auto-reconnect was disabled during wait
-            if not self._auto_reconnect_enabled:
-                _LOGGER.info("Auto-reconnect disabled, stopping reconnection attempts")
-                return
-            
-            try:
-                _LOGGER.info("Reconnection attempt %d/%d for %s", attempt, max_attempts, self.mac_address)
-                await self._async_connect()
-                
-                if self.connected:
-                    _LOGGER.info("Successfully reconnected to Lionel train at %s", self.mac_address)
-                    return
-                    
-            except (BleakError, asyncio.TimeoutError) as err:
-                _LOGGER.debug("Reconnection attempt %d failed: %s", attempt, err)
-        
-        _LOGGER.warning("Failed to reconnect to train after %d attempts. Will retry when command is sent.", max_attempts)
-
-    async def _async_connect(self) -> None:
-        """Connect to the train."""
-        async with self._lock:
-            if self._connected:
-                return
-
-            self._connection_attempts += 1
-
-            # Get a fresh BLE device reference
-            ble_device = bluetooth.async_ble_device_from_address(
-                self.hass, self.mac_address, connectable=True
-            )
-            
-            if not ble_device:
-                # Try to scan for the device if not found in cache
-                _LOGGER.debug("Device not found in cache, attempting fresh lookup")
-                await asyncio.sleep(0.5)  # Brief delay before retry
-                ble_device = bluetooth.async_ble_device_from_address(
-                    self.hass, self.mac_address, connectable=True
-                )
-                
-            if not ble_device:
-                error_msg = f"Could not find Bluetooth device with address {self.mac_address}"
-                self._record_error(error_msg)
-                raise BleakError(error_msg)
-
-            try:
-                _LOGGER.debug("Establishing connection to %s", self.mac_address)
-                self._client = await establish_connection(
-                    BleakClientWithServiceCache,
-                    ble_device,
-                    self.mac_address,
-                    max_attempts=3,
-                    disconnected_callback=self._on_disconnected,
-                )
-                
-                # Mark as connected immediately after establishing connection
-                self._connected = True
-                self._retry_count = 0
-                _LOGGER.info("Connected to Lionel train at %s", self.mac_address)
-                
-                # Read device information if available (non-critical)
-                try:
-                    await self._read_device_info()
-                except Exception as err:
-                    _LOGGER.debug("Could not read device info: %s", err)
-                
-                # Log BLE services for debugging (non-critical, skip on reconnect)
-                if self._discovered_lionchief_service is None:
-                    try:
-                        await self._log_ble_characteristics()
-                    except Exception as err:
-                        _LOGGER.debug("Could not log BLE characteristics: %s", err)
-                
-                # Set up notification handler for status updates (non-critical)
-                try:
-                    notify_char_uuid = NOTIFY_CHARACTERISTIC_UUID
-                    await self._client.start_notify(
-                        notify_char_uuid, self._notification_handler
-                    )
-                    _LOGGER.info("Set up notifications on %s", notify_char_uuid)
-                except BleakError as err:
-                    _LOGGER.debug("Could not set up notifications (train may not support them): %s", err)
-                
-                # Notify all entities that connection state changed
-                self._notify_state_change()
-
-            except BleakError as err:
-                _LOGGER.error("Failed to connect to train: %s", err)
-                self._connected = False
-                self._record_error(f"Connection failed: {err}")
-                raise
-
-    async def _notification_handler(self, sender: int, data: bytearray) -> None:
-        """Handle notifications from the train."""
-        _LOGGER.debug("Received notification: %s", data.hex())
-        
-        # Store the raw notification hex string
-        self._last_notification_hex = data.hex()
-        
-        # Parse locomotive status data based on protocol analysis
-        if len(data) >= 8 and data[0] == 0x00 and data[1] == 0x81 and data[2] == 0x02:
-            # This is train status data: [0x00, 0x81, 0x02, speed, direction, 0x03, 0x0C, flags]
-            try:
-                self._speed = int((data[3] / 31) * 100)  # Convert 0-31 to 0-100%
-                self._direction_forward = data[4] == 0x01
-                
-                # Parse flags byte (data[7])
-                flags = data[7]
-                self._lights_on = (flags & 0x04) != 0
-                self._bell_on = (flags & 0x02) != 0
-                
-                _LOGGER.debug("Parsed train status: speed=%d%%, forward=%s, lights=%s, bell=%s", 
-                             self._speed, self._direction_forward, self._lights_on, self._bell_on)
-                
-                # Notify entities of state change
-                self._notify_state_change()
-                
-            except (IndexError, ValueError) as err:
-                _LOGGER.debug("Error parsing train status: %s", err)
-        else:
-            # For any notification, notify state change to update the hex sensor
-            self._notify_state_change()
-
-    async def _read_device_info(self) -> None:
-        """Read device information characteristics."""
-        device_info_chars = {
-            MODEL_NUMBER_CHAR_UUID: "_model_number",
-            SERIAL_NUMBER_CHAR_UUID: "_serial_number", 
-            FIRMWARE_REVISION_CHAR_UUID: "_firmware_revision",
-            HARDWARE_REVISION_CHAR_UUID: "_hardware_revision",
-            SOFTWARE_REVISION_CHAR_UUID: "_software_revision",
-            MANUFACTURER_NAME_CHAR_UUID: "_manufacturer_name",
-        }
-        
-        for char_uuid, attr_name in device_info_chars.items():
-            try:
-                result = await self._client.read_gatt_char(char_uuid)
-                value = result.decode('utf-8', errors='ignore').strip()
-                if value:
-                    setattr(self, attr_name, value)
-                    _LOGGER.debug("Read %s: %s", attr_name, value)
-            except BleakError:
-                _LOGGER.debug("Could not read characteristic %s", char_uuid)
-
-    async def _log_ble_characteristics(self) -> None:
-        """Log all BLE services and characteristics for debugging and discover dynamic characteristics."""
-        try:
-            _LOGGER.debug("=== BLE Service Discovery for %s ===", self.mac_address)
-            
-            services = self._client.services
-            # Convert to list to get length safely
-            service_list = list(services)
-            _LOGGER.debug("Found %d services", len(service_list))
-            
-            # Store discovered characteristics for dynamic usage
-            self._discovered_write_char = None
-            self._discovered_notify_char = None
-            self._discovered_lionchief_service = None
-            
-            service_count = 0
-            for service in service_list:
-                service_count += 1
-                _LOGGER.debug("Service %d: %s (UUID: %s)", service_count, service.description, service.uuid)
-                
-                # Check if this might be the LionChief control service
-                # Look for services with writable characteristics that aren't standard BLE services
-                is_potential_lionchief = (
-                    str(service.uuid).lower() not in [
-                        "0000180a-0000-1000-8000-00805f9b34fb",  # Device Information
-                        "0000180f-0000-1000-8000-00805f9b34fb",  # Battery Service
-                        "00001800-0000-1000-8000-00805f9b34fb",  # Generic Access
-                        "00001801-0000-1000-8000-00805f9b34fb",  # Generic Attribute
-                    ]
-                )
-                
-                char_count = 0
-                for char in service.characteristics:
-                    char_count += 1
-                    properties = []
-                    has_write = False
-                    has_notify = False
-                    
-                    if "read" in char.properties:
-                        properties.append("READ")
-                    if "write" in char.properties:
-                        properties.append("WRITE")
-                        has_write = True
-                    if "write-without-response" in char.properties:
-                        properties.append("WRITE-NO-RESP")
-                        has_write = True
-                    if "notify" in char.properties:
-                        properties.append("NOTIFY")
-                        has_notify = True
-                    if "indicate" in char.properties:
-                        properties.append("INDICATE")
-                        has_notify = True
-                    
-                    _LOGGER.debug("  Char %d: %s (UUID: %s) [%s]", 
-                               char_count, char.description, char.uuid, ", ".join(properties))
-                    
-                    # Identify potential LionChief characteristics
-                    if is_potential_lionchief:
-                        if has_write and not self._discovered_write_char:
-                            self._discovered_write_char = str(char.uuid)
-                            _LOGGER.debug("    *** POTENTIAL LIONCHIEF WRITE CHARACTERISTIC ***")
-                        if has_notify and not self._discovered_notify_char:
-                            self._discovered_notify_char = str(char.uuid)
-                            _LOGGER.debug("    *** POTENTIAL LIONCHIEF NOTIFY CHARACTERISTIC ***")
-                        
-                        if has_write or has_notify:
-                            self._discovered_lionchief_service = str(service.uuid)
-                    
-                    # Try to read characteristics that support reading (with better error handling)
-                    if "read" in char.properties:
-                        try:
-                            _LOGGER.debug("    Attempting to read characteristic value...")
-                            value = await self._client.read_gatt_char(char.uuid)
-                            if value and len(value) <= 50:  # Increased limit and null check
-                                try:
-                                    # Try to decode as string first
-                                    decoded = value.decode('utf-8').strip('\x00')
-                                    _LOGGER.debug("    Value (text): '%s'", decoded)
-                                except UnicodeDecodeError:
-                                    # Fall back to hex
-                                    _LOGGER.debug("    Value (hex): %s", value.hex())
-                            elif value:
-                                _LOGGER.debug("    Value: <large data, %d bytes>", len(value))
-                        except Exception as err:
-                            _LOGGER.debug("    Could not read value: %s", err)
-                
-                _LOGGER.debug("  Found %d characteristics in this service", char_count)
-                            
-            _LOGGER.debug("=== End BLE Service Discovery ===")
-            
-            # Log discovered LionChief characteristics at debug level
-            if self._discovered_lionchief_service:
-                _LOGGER.debug("🎯 DISCOVERED LIONCHIEF SERVICE: %s", self._discovered_lionchief_service)
-            if self._discovered_write_char:
-                _LOGGER.debug("🎯 DISCOVERED WRITE CHARACTERISTIC: %s", self._discovered_write_char)
-            if self._discovered_notify_char:
-                _LOGGER.debug("🎯 DISCOVERED NOTIFY CHARACTERISTIC: %s", self._discovered_notify_char)
-                
-            # Update constants if we found better characteristics
-            if self._discovered_write_char and self._discovered_write_char != WRITE_CHARACTERISTIC_UUID:
-                _LOGGER.info("💡 Consider updating WRITE_CHARACTERISTIC_UUID to: %s", self._discovered_write_char)
-            if self._discovered_notify_char and self._discovered_notify_char != NOTIFY_CHARACTERISTIC_UUID:
-                _LOGGER.info("💡 Consider updating NOTIFY_CHARACTERISTIC_UUID to: %s", self._discovered_notify_char)
-            
-        except Exception as err:
-            _LOGGER.error("Error during BLE service discovery: %s", err)
-            import traceback
-            _LOGGER.error("Full traceback: %s", traceback.format_exc())
-
-    async def async_send_command(self, command_data: list[int]) -> bool:
-        """Send a command to the train."""
-        async with self._lock:
-            # Try to connect if not connected
-            if not self.connected:
-                try:
-                    await self._async_connect()
-                except BleakError as err:
-                    _LOGGER.error("Failed to connect before sending command: %s", err)
-                    return False
-
-            # Always use the known-good write characteristic UUID
-            write_char_uuid = WRITE_CHARACTERISTIC_UUID
-            
-            # Retry command sending with better error handling
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    await self._client.write_gatt_char(
-                        write_char_uuid, bytearray(command_data)
-                    )
-                    hex_string = ''.join(f'{b:02x}' for b in command_data)
-                    _LOGGER.info("✅ Sent command successfully to %s: %s (hex: %s)", 
-                               write_char_uuid, command_data, hex_string)
-                    
-                    # Update the status sensor with the sent command
-                    self._last_notification_hex = hex_string
-                    self._successful_commands += 1
-                    self._notify_state_change()
-                    
-                    return True
-
-                except BleakError as err:
-                    _LOGGER.warning("Failed to send command to %s (attempt %d/%d): %s", 
-                                  write_char_uuid, attempt + 1, max_retries, err)
-                    self._connected = False
-                    
-                    # Try to reconnect on subsequent attempts
-                    if attempt < max_retries - 1:
-                        try:
-                            await asyncio.sleep(0.5 * (attempt + 1))  # Exponential backoff
-                            await self._async_connect()
-                        except BleakError:
-                            _LOGGER.debug("Reconnection attempt %d failed", attempt + 1)
-                            continue
-                    else:
-                        _LOGGER.error("Failed to send command after %d attempts: %s", max_retries, err)
-                        self._failed_commands += 1
-                        self._record_error(f"Command failed: {err}")
-                        
-            return False
-
-    async def async_set_speed(self, speed: int) -> bool:
-        """Set train speed (0-100)."""
-        if not 0 <= speed <= 100:
-            raise ValueError("Speed must be between 0 and 100")
-        
-        # Convert 0-100 to 0-31 (0x00-0x1F) hex scale
-        hex_speed = int((speed / 100) * 31)
-        command = build_simple_command(0x45, [hex_speed])
-        
-        success = await self.async_send_command(command)
-        if success:
-            self._speed = speed
-            self._notify_state_change()
-        return success
-
-    async def async_set_direction(self, forward: bool) -> bool:
-        """Set train direction."""
-        direction_value = 0x01 if forward else 0x02
-        command = build_simple_command(0x46, [direction_value])
-        
-        success = await self.async_send_command(command)
-        if success:
-            self._direction_forward = forward
-            self._notify_state_change()
-        return success
-
-    async def async_set_lights(self, on: bool) -> bool:
-        """Set train lights."""
-        command = build_simple_command(0x51, [0x01 if on else 0x00])
-        success = await self.async_send_command(command)
-        if success:
-            self._lights_on = on
-        return success
-
-    async def async_set_horn(self, on: bool) -> bool:
-        """Set train horn."""
-        command = build_simple_command(0x48, [0x01 if on else 0x00])
-        success = await self.async_send_command(command)
-        if success:
-            self._horn_on = on
-        return success
-
-    async def async_set_bell(self, on: bool) -> bool:
-        """Set train bell."""
-        command = build_simple_command(0x47, [0x01 if on else 0x00])
-        success = await self.async_send_command(command)
-        if success:
-            self._bell_on = on
-        return success
-
-    async def async_play_announcement(self, announcement_code: int) -> bool:
-        """Play announcement sound."""
-        command = build_simple_command(0x4D, [announcement_code, 0x00])
-        return await self.async_send_command(command)
-
-    async def async_disconnect(self) -> bool:
-        """Disconnect from train."""
-        command = build_simple_command(0x4B, [0x00, 0x00])
-        return await self.async_send_command(command)
-
-    async def async_force_reconnect(self) -> bool:
-        """Force reconnection to the train."""
-        _LOGGER.info("Force reconnecting to Lionel train at %s", self.mac_address)
-        
-        # Clear connection state first - don't try to send disconnect commands
-        # since the locomotive might already be disconnected/powered off
-        self._connected = False
-        if self._client:
-            try:
-                if self._client.is_connected:
-                    await self._client.disconnect()
-                    _LOGGER.debug("Disconnected existing client")
-            except Exception as err:
-                _LOGGER.debug("Error disconnecting client (expected if already disconnected): %s", err)
-            finally:
-                self._client = None
-        
-        # Wait for any existing connections to clear
-        await asyncio.sleep(1.0)
-        
-        # Now try to establish a fresh connection
-        max_attempts = 5
-        for attempt in range(max_attempts):
-            try:
-                _LOGGER.debug("Connection attempt %d/%d", attempt + 1, max_attempts)
-                
-                # Get fresh device reference
-                ble_device = bluetooth.async_ble_device_from_address(
-                    self.hass, self.mac_address, connectable=True
-                )
-                
-                if not ble_device:
-                    if attempt < max_attempts - 1:
-                        wait_time = (attempt + 1) * 1.0  # 1s, 2s, 3s, 4s delays
-                        _LOGGER.debug("Device not found, waiting %s seconds before retry", wait_time)
-                        await asyncio.sleep(wait_time)
-                        continue
-                    else:
-                        raise BleakError(f"Could not find Bluetooth device {self.mac_address}")
-                
-                # Establish fresh connection
-                async with self._lock:
-                    _LOGGER.debug("Establishing connection to %s", self.mac_address)
-                    self._client = await establish_connection(
-                        BleakClientWithServiceCache,
-                        ble_device,
-                        self.mac_address,
-                        max_attempts=3,
-                    )
-                    
-                    # Set up notification handler
-                    try:
-                        await self._client.start_notify(
-                            NOTIFY_CHARACTERISTIC_UUID, self._notification_handler
-                        )
-                    except BleakError:
-                        _LOGGER.debug("Could not set up notifications")
-                    
-                    # Read device information
-                    await self._read_device_info()
-                    
-                    self._connected = True
-                    self._retry_count = 0
-                    _LOGGER.info("Successfully reconnected to train")
-                    
-                    # Notify all entities of the reconnection
-                    self._notify_state_change()
-                    return True
-                    
-            except BleakError as err:
-                _LOGGER.debug("Connection attempt %d failed: %s", attempt + 1, err)
-                if attempt < max_attempts - 1:
-                    wait_time = (attempt + 1) * 2.0  # 2s, 4s, 6s, 8s delays
-                    _LOGGER.debug("Waiting %s seconds before retry", wait_time)
-                    await asyncio.sleep(wait_time)
-                else:
-                    _LOGGER.error("Failed to reconnect after %d attempts: %s", max_attempts, err)
-                    return False
-                    
-        return False
-
-    # Advanced feature control methods
-    async def async_set_master_volume(self, volume: int) -> bool:
-        """Set master volume (0-7)."""
-        if not 0 <= volume <= 7:
-            raise ValueError("Volume must be between 0 and 7")
-        
-        command = build_simple_command(CMD_MASTER_VOLUME, [volume])
-        success = await self.async_send_command(command)
-        if success:
-            self._master_volume = volume
-            self._notify_state_change()
-        return success
-
-    async def async_set_sound_volume(self, sound_source: int, volume: int, pitch: int = None) -> bool:
-        """Set volume and optionally pitch for specific sound source."""
-        if not 0 <= volume <= 7:
-            raise ValueError("Volume must be between 0 and 7")
-        if pitch is not None and not -2 <= pitch <= 2:
-            raise ValueError("Pitch must be between -2 and 2")
-        
-        # Use simple command for better compatibility
-        if pitch is not None:
-            command = build_simple_command(CMD_SOUND_VOLUME, [sound_source, volume, pitch & 0xFF])
-        else:
-            command = build_simple_command(CMD_SOUND_VOLUME, [sound_source, volume])
-        
-        success = await self.async_send_command(command)
-        
-        if success:
-            # Update state tracking based on sound source
-            if sound_source == SOUND_SOURCE_HORN:
-                self._horn_volume = volume
-                if pitch is not None:
-                    self._horn_pitch = pitch
-            elif sound_source == SOUND_SOURCE_BELL:
-                self._bell_volume = volume
-                if pitch is not None:
-                    self._bell_pitch = pitch
-            elif sound_source == SOUND_SOURCE_SPEECH:
-                self._speech_volume = volume
-                if pitch is not None:
-                    self._speech_pitch = pitch
-            elif sound_source == SOUND_SOURCE_ENGINE:
-                self._engine_volume = volume
-                if pitch is not None:
-                    self._engine_pitch = pitch
-            
-            self._notify_state_change()
-        return success
-
-    async def async_set_smoke(self, on: bool) -> bool:
-        """Set smoke unit on/off."""
-        command = build_simple_command(CMD_SMOKE, [0x01 if on else 0x00])
-        success = await self.async_send_command(command)
-        if success:
-            self._smoke_on = on
-            self._notify_state_change()
-        return success

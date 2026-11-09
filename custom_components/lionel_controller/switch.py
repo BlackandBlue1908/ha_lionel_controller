@@ -1,118 +1,81 @@
-"""Switch platform for Lionel Train Controller integration."""
+"""Switch platform for Lionel Train Controller."""
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_NAME
+from homeassistant.const import STATE_OFF, EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 
-from . import LionelTrainCoordinator
-from .const import DOMAIN
+from .coordinator import LionelConfigEntry, LionelTrainCoordinator
+from .entity import LionelEntity
 
-_LOGGER = logging.getLogger(__name__)
+PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    entry: LionelConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up the Lionel Train switch platform."""
-    coordinator: LionelTrainCoordinator = hass.data[DOMAIN][config_entry.entry_id]
-    name = config_entry.data[CONF_NAME]
-    
-    switches = [
-        LionelTrainLightsSwitch(coordinator, name),
-        LionelTrainAutoReconnectSwitch(coordinator, name),
-    ]
-    
-    async_add_entities(switches, True)
+    """Set up switches."""
+    coordinator = entry.runtime_data
+    async_add_entities(
+        [LionelLightsSwitch(coordinator), LionelAutoReconnectSwitch(coordinator)]
+    )
 
 
-class LionelTrainSwitchBase(SwitchEntity):
-    """Base class for Lionel Train switches."""
+class LionelLightsSwitch(LionelEntity, SwitchEntity):
+    """The locomotive's headlight."""
 
-    _attr_has_entity_name = True
+    _attr_translation_key = "lights"
 
-    def __init__(self, coordinator: LionelTrainCoordinator, device_name: str) -> None:
+    def __init__(self, coordinator: LionelTrainCoordinator) -> None:
         """Initialize the switch."""
-        self._coordinator = coordinator
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, coordinator.mac_address)},
-            "name": device_name,
-            **coordinator.device_info,
-        }
-
-    @property
-    def available(self) -> bool:
-        """Return True if entity is available."""
-        return self._coordinator.connected
-
-
-class LionelTrainLightsSwitch(LionelTrainSwitchBase):
-    """Switch for controlling train lights."""
-
-    _attr_name = "Lights"
-    _attr_icon = "mdi:lightbulb"
-
-    def __init__(self, coordinator: LionelTrainCoordinator, device_name: str) -> None:
-        """Initialize the lights switch."""
-        super().__init__(coordinator, device_name)
-        self._attr_unique_id = f"{coordinator.mac_address}_lights"
+        super().__init__(coordinator, "lights")
 
     @property
     def is_on(self) -> bool:
         """Return True if the lights are on."""
-        return self._coordinator.lights_on
+        return self.coordinator.state.lights_on
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Turn on the lights."""
-        await self._coordinator.async_set_lights(True)
-        self.async_write_ha_state()
+        """Turn the lights on."""
+        await self.coordinator.async_set_lights(True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Turn off the lights."""
-        await self._coordinator.async_set_lights(False)
-        self.async_write_ha_state()
+        """Turn the lights off."""
+        await self.coordinator.async_set_lights(False)
 
 
-class LionelTrainAutoReconnectSwitch(SwitchEntity):
-    """Switch for enabling/disabling automatic reconnection."""
+class LionelAutoReconnectSwitch(LionelEntity, SwitchEntity, RestoreEntity):
+    """Whether to connect automatically whenever the train is powered on."""
 
-    _attr_has_entity_name = True
-    _attr_name = "Auto Reconnect"
-    _attr_icon = "mdi:bluetooth-connect"
+    _attr_translation_key = "auto_reconnect"
+    _attr_entity_category = EntityCategory.CONFIG
+    _requires_connection = False
 
-    def __init__(self, coordinator: LionelTrainCoordinator, device_name: str) -> None:
-        """Initialize the auto-reconnect switch."""
-        self._coordinator = coordinator
-        self._attr_unique_id = f"{coordinator.mac_address}_auto_reconnect"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, coordinator.mac_address)},
-            "name": device_name,
-            **coordinator.device_info,
-        }
+    def __init__(self, coordinator: LionelTrainCoordinator) -> None:
+        """Initialize the switch."""
+        super().__init__(coordinator, "auto_reconnect")
 
-    @property
-    def available(self) -> bool:
-        """Return True if entity is available (always available)."""
-        return True
+    async def async_added_to_hass(self) -> None:
+        """Restore the user's choice across restarts."""
+        await super().async_added_to_hass()
+        if (last_state := await self.async_get_last_state()) and last_state.state == STATE_OFF:
+            self.coordinator.async_set_auto_reconnect(False)
 
     @property
     def is_on(self) -> bool:
-        """Return True if auto-reconnect is enabled."""
-        return self._coordinator.auto_reconnect_enabled
+        """Return True if auto-reconnect is on."""
+        return self.coordinator.auto_reconnect
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Enable auto-reconnect."""
-        self._coordinator.set_auto_reconnect(True)
-        self.async_write_ha_state()
+        self.coordinator.async_set_auto_reconnect(True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable auto-reconnect."""
-        self._coordinator.set_auto_reconnect(False)
-        self.async_write_ha_state()
+        self.coordinator.async_set_auto_reconnect(False)

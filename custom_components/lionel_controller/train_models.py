@@ -34,7 +34,7 @@ DEFAULT_ANNOUNCEMENTS = {
 # Value: Dict mapping announcement keys to display names
 TRAIN_MODELS = {
     "Generic": DEFAULT_ANNOUNCEMENTS,
-    
+
     "Polar Express": {
         "random": "Random",
         "ready_to_roll": "Polar Express",
@@ -44,7 +44,7 @@ TRAIN_MODELS = {
         "fastest_freight": "First Gift",
         "penna_flyer": "The King",
     },
-    
+
     # Add more train models below!
     # Example:
     # "Hogwarts Express": {

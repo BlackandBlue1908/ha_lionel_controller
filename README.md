@@ -6,6 +6,16 @@
 
 A Home Assistant custom integration for controlling Lionel LionChief Bluetooth locomotives.
 
+## What's new in 2.0
+
+- Fixed: controls could hang for good when a command was sent while the train was disconnected.
+- Fixed: after pressing Connect, a dropped connection went unnoticed; unloading the integration started a reconnect loop; auto-reconnect gave up after 10 tries.
+- Reconnects when the train starts advertising (no polling), with backoff. Disconnect now stays disconnected until you press Connect.
+- Works through ESPHome Bluetooth proxies end to end, including setup (no private Bluetooth scanner).
+- Actions (`lionel_controller.set_speed` etc.) take an optional `device_id`; without it they go to every train. Failures now raise an error instead of passing silently.
+- Download diagnostics from the device page. Lights and direction follow the train's own status reports.
+- Entity ids are unchanged.
+
 ## Features
 
 - **Throttle Control**: Use a number slider to control train speed (0-100%)

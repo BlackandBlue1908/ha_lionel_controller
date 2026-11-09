@@ -1,191 +1,126 @@
-"""Sensor platform for Lionel Train Controller integration."""
+"""Sensor platform for Lionel Train Controller."""
 from __future__ import annotations
 
-import logging
+from typing import Any
 
-from homeassistant.components.sensor import SensorEntity
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_NAME
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from . import LionelTrainCoordinator
-from .const import CONF_TRAIN_MODEL, DOMAIN
+from .coordinator import LionelConfigEntry, LionelTrainCoordinator
+from .entity import LionelEntity
 
-_LOGGER = logging.getLogger(__name__)
+PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    entry: LionelConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up the Lionel Train sensor platform."""
-    coordinator: LionelTrainCoordinator = hass.data[DOMAIN][config_entry.entry_id]
-    name = config_entry.data[CONF_NAME]
-    train_model = config_entry.data.get(CONF_TRAIN_MODEL, "Generic")
-    
-    async_add_entities([
-        LionelTrainStatusSensor(coordinator, name),
-        LionelTrainModelSensor(coordinator, name, train_model),
-        LionelTrainDirectionSensor(coordinator, name),
-        LionelTrainDiagnosticsSensor(coordinator, name),
-    ], True)
+    """Set up sensors."""
+    coordinator = entry.runtime_data
+    async_add_entities(
+        [
+            LionelStatusSensor(coordinator),
+            LionelModelSensor(coordinator),
+            LionelDirectionSensor(coordinator),
+            LionelDiagnosticsSensor(coordinator),
+        ]
+    )
 
 
-class LionelTrainStatusSensor(SensorEntity):
-    """Sensor for Lionel Train status information."""
+class LionelStatusSensor(LionelEntity, SensorEntity):
+    """Last message exchanged with the train, as hex."""
 
-    _attr_has_entity_name = True
-    _attr_name = "Status"
-    _attr_icon = "mdi:train"
+    _attr_translation_key = "status"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
-    def __init__(self, coordinator: LionelTrainCoordinator, device_name: str) -> None:
+    def __init__(self, coordinator: LionelTrainCoordinator) -> None:
         """Initialize the sensor."""
-        self._coordinator = coordinator
-        self._attr_unique_id = f"{coordinator.mac_address}_status"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, coordinator.mac_address)},
-            "name": device_name,
-            **coordinator.device_info,
-        }
-        # Register for state updates
-        self._coordinator.add_update_callback(self.async_write_ha_state)
-
-    async def async_will_remove_from_hass(self) -> None:
-        """Entity being removed from hass."""
-        self._coordinator.remove_update_callback(self.async_write_ha_state)
+        super().__init__(coordinator, "status")
 
     @property
     def native_value(self) -> str | None:
-        """Return the state of the sensor."""
-        hex_value = self._coordinator.last_notification_hex
-        if hex_value is None:
-            return "No data"
-        return hex_value
+        """Return the last message."""
+        return self.coordinator.stats.last_message_hex
 
     @property
-    def available(self) -> bool:
-        """Return True if entity is available."""
-        return self._coordinator.connected
-
-    @property
-    def extra_state_attributes(self) -> dict[str, any]:
-        """Return additional state attributes."""
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the tracked train state."""
+        state = self.coordinator.state
         return {
-            "speed": self._coordinator.speed,
-            "direction_forward": self._coordinator.direction_forward,
-            "lights_on": self._coordinator.lights_on,
-            "bell_on": self._coordinator.bell_on,
-            "horn_on": self._coordinator.horn_on,
+            "speed": state.speed,
+            "direction_forward": state.direction_forward,
+            "lights_on": state.lights_on,
+            "bell_on": state.bell_on,
+            "horn_on": state.horn_on,
         }
 
 
-class LionelTrainModelSensor(SensorEntity):
-    """Sensor for Lionel Train model information."""
+class LionelModelSensor(LionelEntity, SensorEntity):
+    """The train model chosen at setup (decides announcement names)."""
 
-    _attr_has_entity_name = True
-    _attr_name = "Train Model"
-    _attr_icon = "mdi:train-variant"
+    _attr_translation_key = "train_model"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _requires_connection = False
 
-    def __init__(self, coordinator: LionelTrainCoordinator, device_name: str, train_model: str) -> None:
+    def __init__(self, coordinator: LionelTrainCoordinator) -> None:
         """Initialize the sensor."""
-        self._coordinator = coordinator
-        self._train_model = train_model
-        self._attr_unique_id = f"{coordinator.mac_address}_train_model"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, coordinator.mac_address)},
-            "name": device_name,
-        }
+        super().__init__(coordinator, "train_model")
+        self._attr_native_value = coordinator.train_model
+
+
+class LionelDirectionSensor(LionelEntity, SensorEntity):
+    """Direction of travel."""
+
+    _attr_translation_key = "direction"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["forward", "reverse"]
+
+    def __init__(self, coordinator: LionelTrainCoordinator) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, "direction")
 
     @property
     def native_value(self) -> str:
-        """Return the train model."""
-        return self._train_model
-
-    @property
-    def available(self) -> bool:
-        """Return True - this sensor is always available."""
-        return True
+        """Return forward or reverse."""
+        return "forward" if self.coordinator.state.direction_forward else "reverse"
 
 
-class LionelTrainDirectionSensor(SensorEntity):
-    """Sensor for Lionel Train direction (forward/reverse)."""
+class LionelDiagnosticsSensor(LionelEntity, SensorEntity):
+    """OK / Disconnected / Error, with counters. Full detail is in Download diagnostics."""
 
-    _attr_has_entity_name = True
-    _attr_name = "Direction"
-    _attr_icon = "mdi:arrow-left-right"
+    _attr_translation_key = "diagnostics"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["ok", "disconnected", "error"]
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _requires_connection = False
 
-    def __init__(self, coordinator: LionelTrainCoordinator, device_name: str) -> None:
+    def __init__(self, coordinator: LionelTrainCoordinator) -> None:
         """Initialize the sensor."""
-        self._coordinator = coordinator
-        self._attr_unique_id = f"{coordinator.mac_address}_direction"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, coordinator.mac_address)},
-            "name": device_name,
-        }
-        self._coordinator.add_update_callback(self.async_write_ha_state)
-
-    async def async_will_remove_from_hass(self) -> None:
-        """Entity being removed from hass."""
-        self._coordinator.remove_update_callback(self.async_write_ha_state)
+        super().__init__(coordinator, "diagnostics")
 
     @property
     def native_value(self) -> str:
-        """Return the direction as forward or reverse."""
-        return "forward" if self._coordinator.direction_forward else "reverse"
+        """Return the overall health."""
+        if self.coordinator.connected:
+            return "ok"
+        if self.coordinator.stats.last_error:
+            return "error"
+        return "disconnected"
 
     @property
-    def available(self) -> bool:
-        """Return True if entity is available."""
-        return self._coordinator.connected
-
-
-class LionelTrainDiagnosticsSensor(SensorEntity):
-    """Sensor for Lionel Train diagnostics and error tracking."""
-
-    _attr_has_entity_name = True
-    _attr_name = "Diagnostics"
-    _attr_icon = "mdi:bug"
-
-    def __init__(self, coordinator: LionelTrainCoordinator, device_name: str) -> None:
-        """Initialize the sensor."""
-        self._coordinator = coordinator
-        self._attr_unique_id = f"{coordinator.mac_address}_diagnostics"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, coordinator.mac_address)},
-            "name": device_name,
-        }
-        self._coordinator.add_update_callback(self.async_write_ha_state)
-
-    async def async_will_remove_from_hass(self) -> None:
-        """Entity being removed from hass."""
-        self._coordinator.remove_update_callback(self.async_write_ha_state)
-
-    @property
-    def native_value(self) -> str:
-        """Return the diagnostic status."""
-        if self._coordinator.last_error:
-            return "Error"
-        elif self._coordinator.connected:
-            return "OK"
-        else:
-            return "Disconnected"
-
-    @property
-    def available(self) -> bool:
-        """Return True - diagnostics are always available."""
-        return True
-
-    @property
-    def extra_state_attributes(self) -> dict[str, any]:
-        """Return diagnostic attributes."""
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return counters and the last error."""
+        stats = self.coordinator.stats
         return {
-            "last_error": self._coordinator.last_error,
-            "last_error_time": self._coordinator.last_error_time,
-            "connection_attempts": self._coordinator.connection_attempts,
-            "successful_commands": self._coordinator.successful_commands,
-            "failed_commands": self._coordinator.failed_commands,
-            "connected": self._coordinator.connected,
-            "auto_reconnect_enabled": self._coordinator.auto_reconnect_enabled,
+            "last_error": stats.last_error,
+            "last_error_time": stats.last_error_time.isoformat() if stats.last_error_time else None,
+            "connection_attempts": stats.connection_attempts,
+            "successful_commands": stats.successful_commands,
+            "failed_commands": stats.failed_commands,
+            "connected": self.coordinator.connected,
+            "auto_reconnect_enabled": self.coordinator.auto_reconnect,
         }

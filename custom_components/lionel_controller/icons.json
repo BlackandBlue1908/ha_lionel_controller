@@ -1,0 +1,111 @@
+{
+  "entity": {
+    "number": {
+      "throttle": {
+        "default": "mdi:train"
+      },
+      "master_volume": {
+        "default": "mdi:volume-high"
+      },
+      "horn_volume": {
+        "default": "mdi:bullhorn"
+      },
+      "bell_volume": {
+        "default": "mdi:bell"
+      },
+      "speech_volume": {
+        "default": "mdi:account-voice"
+      },
+      "engine_volume": {
+        "default": "mdi:engine"
+      }
+    },
+    "switch": {
+      "lights": {
+        "default": "mdi:lightbulb",
+        "state": {
+          "off": "mdi:lightbulb-off"
+        }
+      },
+      "auto_reconnect": {
+        "default": "mdi:bluetooth-connect"
+      }
+    },
+    "button": {
+      "connect": {
+        "default": "mdi:bluetooth-connect"
+      },
+      "disconnect": {
+        "default": "mdi:bluetooth-off"
+      },
+      "stop": {
+        "default": "mdi:stop"
+      },
+      "forward": {
+        "default": "mdi:arrow-right"
+      },
+      "reverse": {
+        "default": "mdi:arrow-left"
+      },
+      "horn": {
+        "default": "mdi:bullhorn"
+      },
+      "bell": {
+        "default": "mdi:bell"
+      },
+      "announcement": {
+        "default": "mdi:bullhorn-variant"
+      }
+    },
+    "sensor": {
+      "status": {
+        "default": "mdi:train"
+      },
+      "train_model": {
+        "default": "mdi:train-variant"
+      },
+      "direction": {
+        "default": "mdi:arrow-left-right"
+      },
+      "diagnostics": {
+        "default": "mdi:heart-pulse",
+        "state": {
+          "error": "mdi:alert-circle",
+          "disconnected": "mdi:bluetooth-off"
+        }
+      }
+    }
+  },
+  "services": {
+    "set_speed": {
+      "service": "mdi:speedometer"
+    },
+    "set_direction": {
+      "service": "mdi:swap-horizontal"
+    },
+    "stop": {
+      "service": "mdi:stop"
+    },
+    "horn": {
+      "service": "mdi:bullhorn"
+    },
+    "bell": {
+      "service": "mdi:bell"
+    },
+    "lights_on": {
+      "service": "mdi:lightbulb-on"
+    },
+    "lights_off": {
+      "service": "mdi:lightbulb-off"
+    },
+    "play_announcement": {
+      "service": "mdi:bullhorn-variant"
+    },
+    "connect": {
+      "service": "mdi:bluetooth-connect"
+    },
+    "disconnect": {
+      "service": "mdi:bluetooth-off"
+    }
+  }
+}

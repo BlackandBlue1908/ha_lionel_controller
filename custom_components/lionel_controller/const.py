@@ -83,37 +83,37 @@ def calculate_checksum(command_code: int, parameters: list[int] = None) -> int:
     """Calculate proper Lionel checksum based on protocol."""
     if parameters is None:
         parameters = []
-    
+
     # Checksum calculation: 0xFF - command - sum(parameters)
     checksum = 0xFF - command_code
     for param in parameters:
         checksum = (checksum - param) & 0xFF
-    
+
     return checksum
 
 def build_command(command_code: int, parameters: list[int] = None) -> list[int]:
     """Build a properly formatted Lionel command with correct checksum."""
     if parameters is None:
         parameters = []
-    
+
     # Enhanced command structure: [0x00, command, param1, param2, ..., checksum]
     command = [CMD_ZERO_BYTE, command_code] + parameters
-    
+
     # Add proper checksum
     checksum = calculate_checksum(command_code, parameters)
     command.append(checksum)
-    
+
     return command
 
 def build_simple_command(command_code: int, parameters: list[int] = None) -> list[int]:
     """Build a simple Lionel command without checksum for basic compatibility."""
     if parameters is None:
         parameters = []
-    
+
     # Simple command structure: [0x00, command, param1, param2, ...]
     # No checksum for maximum compatibility
     command = [CMD_ZERO_BYTE, command_code] + parameters
-    
+
     return command
 
 def build_volume_command(sound_source: int, volume: int, pitch: int = None) -> list[int]:

@@ -1,10 +1,11 @@
 set_speed:
-  name: Set Speed
-  description: Set the train speed (0-100%).
   fields:
+    device_id:
+      required: false
+      selector:
+        device:
+          integration: lionel_controller
     speed:
-      name: Speed
-      description: Speed percentage (0-100).
       required: true
       example: 50
       selector:
@@ -14,12 +15,13 @@ set_speed:
           unit_of_measurement: "%"
 
 set_direction:
-  name: Set Direction
-  description: Set the train direction.
   fields:
+    device_id:
+      required: false
+      selector:
+        device:
+          integration: lionel_controller
     direction:
-      name: Direction
-      description: Direction of travel.
       required: true
       example: "forward"
       selector:
@@ -29,43 +31,72 @@ set_direction:
             - "reverse"
 
 stop:
-  name: Stop
-  description: Stop the train immediately.
+  fields:
+    device_id:
+      required: false
+      selector:
+        device:
+          integration: lionel_controller
 
 horn:
-  name: Horn
-  description: Sound the train horn.
+  fields:
+    device_id:
+      required: false
+      selector:
+        device:
+          integration: lionel_controller
 
 bell:
-  name: Bell
-  description: Ring the train bell.
+  fields:
+    device_id:
+      required: false
+      selector:
+        device:
+          integration: lionel_controller
 
 lights_on:
-  name: Lights On
-  description: Turn on the train lights.
+  fields:
+    device_id:
+      required: false
+      selector:
+        device:
+          integration: lionel_controller
 
 lights_off:
-  name: Lights Off
-  description: Turn off the train lights.
+  fields:
+    device_id:
+      required: false
+      selector:
+        device:
+          integration: lionel_controller
 
 play_announcement:
-  name: Play Announcement
-  description: Play a train announcement.
   fields:
+    device_id:
+      required: false
+      selector:
+        device:
+          integration: lionel_controller
     announcement:
-      name: Announcement Code
-      description: The announcement code to play.
       required: true
       example: 1
       selector:
         number:
           min: 0
-          max: 255
+          max: 6
 
 connect:
-  name: Connect
-  description: Connect to the train.
+  fields:
+    device_id:
+      required: false
+      selector:
+        device:
+          integration: lionel_controller
 
 disconnect:
-  name: Disconnect
-  description: Disconnect from the train.
+  fields:
+    device_id:
+      required: false
+      selector:
+        device:
+          integration: lionel_controller

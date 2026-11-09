@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.util import dt as dt_util
 
 from custom_components.lionel_controller.const import DOMAIN
 from custom_components.lionel_controller.coordinator import (
@@ -225,3 +227,41 @@ async def test_device_info_from_gatt(
     assert device.sw_version == "1.4"
     assert device.serial_number == "SN123"
     assert device.manufacturer == "Lionel"
+
+
+async def test_drop_reconnects_without_new_advertisement(
+    hass: HomeAssistant, config_entry: MockConfigEntry, fake_bt: FakeBluetooth
+) -> None:
+    """HA only forwards changed advertisements; a drop must be retried on a timer."""
+    await _setup(hass, config_entry)
+    coordinator = config_entry.runtime_data
+    fake_bt.fail_connect = True
+    fake_bt.client.drop()
+    await hass.async_block_till_done()
+    assert not coordinator.connected
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=6))
+    await hass.async_block_till_done()
+    assert not coordinator.connected  # first retry failed, next in 10 s
+    fake_bt.fail_connect = False
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=17))
+    await hass.async_block_till_done()
+    assert coordinator.connected
+    assert hass.states.get("binary_sensor.polar_express_connection").state == "on"
+
+
+async def test_no_retry_when_released_or_off(
+    hass: HomeAssistant, config_entry: MockConfigEntry, fake_bt: FakeBluetooth
+) -> None:
+    """Retries stop for Disconnect, auto reconnect off, and unload."""
+    await _setup(hass, config_entry)
+    coordinator = config_entry.runtime_data
+    await coordinator.async_disconnect()
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=120))
+    await hass.async_block_till_done()
+    assert len(fake_bt.clients) == 1
+    await coordinator.async_connect()
+    coordinator.async_set_auto_reconnect(False)
+    fake_bt.client.drop()
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=240))
+    await hass.async_block_till_done()
+    assert len(fake_bt.clients) == 2

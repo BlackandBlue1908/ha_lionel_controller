@@ -18,6 +18,7 @@ from homeassistant.const import CONF_NAME
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.event import async_call_later
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -147,6 +148,7 @@ class LionelTrainCoordinator:
         self._next_attempt = 0.0
         self._auto_reconnect = True
         self._closed = False
+        self._retry_cancel: CALLBACK_TYPE | None = None
 
     # ----------------------------------------------------------------- state
 
@@ -200,6 +202,7 @@ class LionelTrainCoordinator:
     async def async_shutdown(self) -> None:
         """Disconnect without triggering a reconnect."""
         self._closed = True
+        self._async_cancel_retry()
         if self._connect_task and not self._connect_task.done():
             self._connect_task.cancel()
         await self._async_drop_client()
@@ -212,8 +215,10 @@ class LionelTrainCoordinator:
             self._next_attempt = 0.0
             if bluetooth.async_ble_device_from_address(self.hass, self.address, connectable=True):
                 self._async_schedule_connect()
-        elif self._connect_task and not self._connect_task.done():
-            self._connect_task.cancel()
+        else:
+            self._async_cancel_retry()
+            if self._connect_task and not self._connect_task.done():
+                self._connect_task.cancel()
         self._async_notify()
 
     # ----------------------------------------------------------- connecting
@@ -224,7 +229,12 @@ class LionelTrainCoordinator:
         service_info: bluetooth.BluetoothServiceInfoBleak,
         change: bluetooth.BluetoothChange,
     ) -> None:
-        """The train is advertising, so it is powered and free to connect."""
+        """The train's advertisement changed, e.g. it was just powered on.
+
+        Home Assistant only calls this when the advertisement's content changes,
+        so a train that stays on and keeps advertising the same data is handled
+        by the retry timer instead.
+        """
         if self._auto_reconnect and not self._user_disconnected and not self.connected:
             self._async_schedule_connect()
 
@@ -245,6 +255,28 @@ class LionelTrainCoordinator:
             await self._async_ensure_connected()
         except (BleakError, TimeoutError) as err:
             _LOGGER.debug("%s: automatic connection failed: %s", self.name, err)
+            self._async_schedule_retry()
+
+    @callback
+    def _async_schedule_retry(self) -> None:
+        """Try again later: 5, 10, 20, 30 s, then every 60 s."""
+        if self._closed or not self._auto_reconnect or self._user_disconnected or self.connected:
+            return
+        self._async_cancel_retry()
+        delay = RECONNECT_BACKOFF[min(self._failures, len(RECONNECT_BACKOFF) - 1)]
+        self._retry_cancel = async_call_later(self.hass, delay, self._async_retry)
+
+    @callback
+    def _async_retry(self, _now: datetime) -> None:
+        self._retry_cancel = None
+        self._next_attempt = 0.0
+        self._async_schedule_connect()
+
+    @callback
+    def _async_cancel_retry(self) -> None:
+        if self._retry_cancel is not None:
+            self._retry_cancel()
+            self._retry_cancel = None
 
     async def _async_ensure_connected(self) -> BleakClientWithServiceCache:
         """Return a connected client, connecting first if needed."""
@@ -258,6 +290,7 @@ class LionelTrainCoordinator:
                 self.hass, self.address, connectable=True
             )
             if ble_device is None:
+                self._failures += 1
                 message = f"{self.name} is not in range of any Bluetooth adapter or proxy"
                 self._record_error(message)
                 self._async_notify()
@@ -286,6 +319,7 @@ class LionelTrainCoordinator:
 
             self._client = client
             self._expected_disconnect = False
+            self._async_cancel_retry()
             self._failures = 0
             self._next_attempt = 0.0
             self.stats.last_error = None
@@ -308,11 +342,12 @@ class LionelTrainCoordinator:
         if client is not self._client:
             return
         self._client = None
-        if self._expected_disconnect:
+        expected, self._expected_disconnect = self._expected_disconnect, False
+        if expected:
             _LOGGER.debug("%s: disconnected", self.name)
         else:
-            _LOGGER.info("%s: connection lost; will reconnect when it advertises", self.name)
-        self._expected_disconnect = False
+            _LOGGER.info("%s: connection lost; reconnecting", self.name)
+            self._async_schedule_retry()
         self._async_notify()
 
     async def _async_drop_client(self) -> None:
@@ -411,6 +446,7 @@ class LionelTrainCoordinator:
     async def async_disconnect(self) -> None:
         """Release the train (user request) and stay off until asked to connect."""
         self._user_disconnected = True
+        self._async_cancel_retry()
         if self._connect_task and not self._connect_task.done():
             self._connect_task.cancel()
         async with self._command_lock:
